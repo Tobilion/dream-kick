@@ -1,2 +1,6 @@
 .DS_Store
 *.log
+
+CLAUDE.md
+MASTER_PROMPT.md
+FEATURES.md
