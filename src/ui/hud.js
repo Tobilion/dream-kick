@@ -31,7 +31,7 @@ export class Hud {
       <div id="goalBanner"><span id="goalText">GOAL!</span><span id="goalSub"></span></div>
       <div id="phaseBanner"></div>
       <div id="ticker"></div>
-      <div id="kbHints">
+      <div id="kbHints" style="right: 14px; bottom: 14px; left: auto; text-align: right;">
         <span><b>X</b> pass/tackle</span><span><b>C</b> shoot</span><span><b>Shift</b> sprint</span><span><b>Q</b> switch</span>
       </div>
       <div id="pauseOverlay">
@@ -53,7 +53,10 @@ export class Hud {
     });
     this.tickerTimeout = null;
     this.isTouch = matchMedia('(pointer:coarse)').matches;
-    if (this.isTouch) this.el.querySelector('#kbHints').style.display = 'none';
+    if (this.isTouch) {
+      this.el.querySelector('#kbHints').style.display = 'none';
+    }
+    this.idleTime = 0;
   }
 
   bind(match) {
@@ -66,6 +69,7 @@ export class Hud {
     this.el.querySelector('#sbUH').style.background = h.kits.home[0];
     this.el.querySelector('#sbUA').style.background = a.kits.away[0];
     this.show(true);
+    this.idleTime = 0;
   }
 
   show(on) { this.el.style.display = on ? 'block' : 'none'; }
@@ -77,7 +81,15 @@ export class Hud {
     this.el.querySelector('#goalText').textContent = 'GOAL!';
     this.el.querySelector('#goalSub').textContent = `${scorer} ${minute}' — ${teamName}`;
     b.classList.add('on');
-    setTimeout(() => b.classList.remove('on'), 2800);
+    
+    // Flash scoreboard pill
+    const sb = this.el.querySelector('.scoreboard');
+    sb.classList.add('flash');
+    
+    setTimeout(() => {
+      b.classList.remove('on');
+      sb.classList.remove('flash');
+    }, 2800);
   }
 
   phaseBanner(text) {
@@ -97,7 +109,7 @@ export class Hud {
   }
 
   /** per-frame refresh */
-  update(match, camera3, rendererSize) {
+  update(match, camera3, rendererSize, dt = 1/60) {
     this.el.querySelector('#sbS').textContent = `${match.score[0]} – ${match.score[1]}`;
     this.el.querySelector('#sbClock').textContent = formatClock(match.matchClockSeconds);
 
@@ -107,12 +119,33 @@ export class Hud {
     pw.style.opacity = charge > 0.02 ? 1 : 0;
     this.el.querySelector('#powerBar').style.width = `${Math.round(charge * 100)}%`;
 
-    // stamina
+    // stamina bar positioned under the radar (updated via staminaWrap styling in css)
     const c = match.controlled;
     if (c) {
       const bar = this.el.querySelector('#staminaBar');
       bar.style.width = `${Math.round(c.stamina)}%`;
       bar.style.background = c.stamina < 25 ? 'var(--warn)' : 'var(--accent)';
+      
+      // Idle check for control hints
+      if (Math.abs(c.vel.x) > 0.1 || Math.abs(c.vel.z) > 0.1) {
+        this.idleTime = 0;
+      } else {
+        this.idleTime += dt;
+      }
+    } else {
+      this.idleTime += dt;
+    }
+
+    // Keyboard hints fading
+    const hints = this.el.querySelector('#kbHints');
+    if (hints && !this.isTouch) {
+      if (match.paused || this.idleTime < 4) {
+        hints.style.opacity = '1';
+        hints.style.transition = 'opacity 0.3s';
+      } else {
+        hints.style.opacity = '0';
+        hints.style.transition = 'opacity 0.8s';
+      }
     }
 
     // name plate above controlled player
@@ -132,13 +165,22 @@ export class Hud {
   drawRadar(match) {
     const g = this.rg, W = this.radar.width, H = this.radar.height;
     g.clearRect(0, 0, W, H);
-    g.fillStyle = 'rgba(8,12,26,0.72)';
-    roundRect(g, 0, 0, W, H, 10); g.fill();
+    
+    // Dark modern card style radar base
+    g.fillStyle = 'rgba(18,21,28,0.85)';
+    roundRect(g, 0, 0, W, H, 16); g.fill();
+    
+    // Border
+    g.strokeStyle = 'rgba(255,255,255,0.08)'; g.lineWidth = 1.5;
+    g.stroke();
+    
     const pad = 12;
     const sx = (W - pad * 2) / PITCH.LENGTH, sz = (H - pad * 2) / PITCH.WIDTH;
     const X = x => pad + (x + PITCH.LENGTH / 2) * sx;
     const Z = z => pad + (z + PITCH.WIDTH / 2) * sz;
-    g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 1;
+    
+    // Field markings
+    g.strokeStyle = 'rgba(255,255,255,0.15)'; g.lineWidth = 1;
     g.strokeRect(X(-PITCH.LENGTH / 2), Z(-PITCH.WIDTH / 2), PITCH.LENGTH * sx, PITCH.WIDTH * sz);
     g.beginPath(); g.moveTo(X(0), Z(-PITCH.WIDTH / 2)); g.lineTo(X(0), Z(PITCH.WIDTH / 2)); g.stroke();
     g.beginPath(); g.arc(X(0), Z(0), 9.15 * sx, 0, Math.PI * 2); g.stroke();

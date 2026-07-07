@@ -1,22 +1,30 @@
 # Dream Kick ⚽
 
-A browser-based 3D football game — live, playable 11v11 matches with a FIFA-style interface and a full career mode, built entirely in vanilla JavaScript and Three.js. No frameworks, no build step, no external assets: every texture, badge and icon is generated in code at runtime.
+A browser-based 3D football game — live, playable 11v11 matches with a premium, animated FIFA-style interface and a full career mode, built entirely in vanilla JavaScript and Three.js. No frameworks, no build step, no external assets: every texture, badge and icon is generated in code at runtime.
 
-## Features
+## Premium UI Overhaul Features (FIFA-Style Language)
 
-- **Live match engine** — real-time 11v11 on a 3D pitch: move, pass, shoot, tackle, sprint and switch players against AI opponents, with ball physics (arc, bounce, spin), goalkeepers, and a HUD with score, clock and mini-radar
-- **Controls that adapt** — keyboard on desktop (WASD/arrows, X pass, Z/Space shoot, Shift sprint, C switch), virtual joystick + buttons on mobile, auto-detected
-- **Career mode** — create your club (name, kit colors, generated badge), climb from Division 2 to Division 1, sign real-name players, train your squad, upgrade your stadium and meet board objectives
-- **Fully offline** — installable PWA: after the first visit it runs with no internet, and progress saves locally
-- **Zero assets** — 100% code-drawn graphics; the only dependency is Three.js, vendored locally
+We have rebuilt the user interface from the ground up to match the standards of a premium product site, incorporating the following components and motion rules:
+- **Design Tokens**: Defined color theme using rich dark-navy surfaces (`#0a0c10`), vibrant teal-green (`#00d4a3`), and secondary blue accents (`#3d6bff`).
+- **FIFA Skewed Styling**: Parallelogram motifs on cards and buttons via custom CSS `clip-path` rules.
+- **SpotlightCard & TiltCard**: Radial cursor-following glows combined with smooth 3D tilting on main menu tiles, lineup cards, and stats containers.
+- **MagneticButtons**: CTAs and main actions attract to the pointer and scale down slightly on click/tap.
+- **GlowOrbs**: Multi-layered ambient orbs (`blur(180px)`) positioned behind content to defeat the "flat black page" look.
+- **TextScramble**: Headline scramble animations resolving left-to-right on first load.
+- **TubelightNav**: Segmented controls with sliding active indicator pills that glow.
+- **ProgressRing & Counters**: circular percentage indicators (used in MOTM ratings) and viewport-trigged ease-out count-ups.
+- **WebAudio Sound Effects**: Audio chimes playing on hover and click actions (can be toggled in the menu).
+- **Toast System & Modals**: Bottom-right stacked notification toasts and trap-focused backdrop-blurred dialogs.
+- **Lineup Splash & Signature Wipes**: Diagonal screen wipes (300ms) transition screens. Staggered team slide-in lineups before matches.
+- **Classic Career Dashboard**: A full week-by-week league table simulation (20 clubs) where other match results are simulated, allowing you to guide your club directly to the top.
 
-## Tech
+## How to Run it
 
-Vanilla JavaScript (ES modules) · Three.js · Canvas-generated textures · Service worker + localStorage. No npm, no bundler.
+**Easiest (Windows): double-click `play.bat`** — it starts a local server and opens the game in your browser. Keep the black window open while playing; close it to stop.
 
-## Run it
+Or play the live version: **[dream-kick.vercel.app](https://dream-kick.vercel.app/)**
 
-Any static file server works. Easiest with Python (preinstalled on most systems):
+Or manually with any static file server:
 
 ```bash
 cd dream-kick
@@ -28,15 +36,6 @@ Then open **http://localhost:8000** in your browser.
 > **Note:** double-clicking `index.html` won't work — ES modules and the service worker require the page to be served over http(s). If you see `http://[::]:8000` in the terminal, that's normal; still browse to `localhost:8000`.
 
 Alternatives: `npx serve`, VS Code's Live Server extension, or any web host.
-
-## Deploying live
-
-The game is a static site — upload the folder to any static host:
-
-- **GitHub Pages:** push the repo, enable Pages on the main branch — done.
-- **Netlify / Vercel:** drag-and-drop the folder or connect the repo (no build command, publish directory = root).
-
-HTTPS (which these hosts provide automatically) is required for the offline/PWA install feature.
 
 ## Project structure
 
@@ -51,7 +50,7 @@ src/
   engine/         match logic: ball, players, AI, goalkeeper, rules
   render/         Three.js scene, stadium, meshes, camera, effects
   input/          keyboard + touch abstraction
-  ui/             screens, HUD, inline SVG icons
+  ui/             screens, HUD, inline SVG icons, components helper
 ```
 
 All gameplay tuning (physics, AI difficulty, camera, timings) lives in `src/core/config.js`.

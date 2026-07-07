@@ -3,6 +3,7 @@ import * as THREE from '../vendor/three.module.js';
 import { CONFIG } from './core/config.js';
 import { StateMachine } from './core/state.js';
 import { loadSave, writeSave, recordResult } from './core/save.js';
+import { CLUBS } from './data/teams.js';
 import { Match } from './engine/match.js';
 import { SceneMgr } from './render/scene.js';
 import { Stadium } from './render/stadium.js';
@@ -106,6 +107,82 @@ fsm.register('MATCH', {
             home: match.teams[0].club.code, away: match.teams[1].club.code,
             hs: match.score[0], as: match.score[1],
           });
+          
+          if (match._opts.isCareer) {
+            const myClubId = save.career.clubId;
+            const oppClubId = match._opts.awayClub.id;
+            const myScore = match.score[0];
+            const oppScore = match.score[1];
+            
+            const myStats = save.career.stats.find(st => st.id === myClubId);
+            if (myStats) {
+              myStats.pld++;
+              myStats.gf += myScore;
+              myStats.ga += oppScore;
+              if (myScore > oppScore) { myStats.w++; myStats.pts += 3; }
+              else if (myScore === oppScore) { myStats.d++; myStats.pts += 1; }
+              else { myStats.l++; }
+            }
+            
+            const oppStats = save.career.stats.find(st => st.id === oppClubId);
+            if (oppStats) {
+              oppStats.pld++;
+              oppStats.gf += oppScore;
+              oppStats.ga += myScore;
+              if (oppScore > myScore) { oppStats.w++; oppStats.pts += 3; }
+              else if (oppScore === myScore) { oppStats.d++; oppStats.pts += 1; }
+              else { oppStats.l++; }
+            }
+            
+            const week = save.career.week;
+            const stats = save.career.stats;
+            const playedThisWeek = new Set([myClubId, oppClubId]);
+            
+            for (let i = 0; i < stats.length; i++) {
+              const st = stats[i];
+              if (playedThisWeek.has(st.id)) continue;
+              
+              const oppIdx = (st.id + week) % stats.length;
+              const oppSt = stats[oppIdx];
+              
+              if (oppSt && !playedThisWeek.has(oppSt.id)) {
+                playedThisWeek.add(st.id);
+                playedThisWeek.add(oppSt.id);
+                
+                const r1 = CLUBS[st.id].rating;
+                const r2 = CLUBS[oppSt.id].rating;
+                
+                let s1 = Math.floor(Math.random() * 2);
+                let s2 = Math.floor(Math.random() * 2);
+                
+                if (r1 > r2 + 4) s1 += Math.floor(Math.random() * 2);
+                else if (r2 > r1 + 4) s2 += Math.floor(Math.random() * 2);
+                
+                st.pld++;
+                st.gf += s1;
+                st.ga += s2;
+                
+                oppSt.pld++;
+                oppSt.gf += s2;
+                oppSt.ga += s1;
+                
+                if (s1 > s2) {
+                  st.w++; st.pts += 3;
+                  oppSt.l++;
+                } else if (s1 === s2) {
+                  st.d++; st.pts += 1;
+                  oppSt.d++; oppSt.pts += 1;
+                } else {
+                  st.l++;
+                  oppSt.w++; oppSt.pts += 3;
+                }
+              }
+            }
+            
+            save.career.week++;
+            writeSave(save);
+          }
+          
           setTimeout(() => fsm.go('RESULTS'), 900);
         },
       },
@@ -200,7 +277,7 @@ function frame(now) {
       ringMesh.visible = true;
     }
     cam.update(dt, match.ball.pos, match.ball.vel);
-    hud.update(match, cam.cam, { w: window.innerWidth, h: window.innerHeight });
+    hud.update(match, cam.cam, { w: window.innerWidth, h: window.innerHeight }, dt);
   } else {
     cam.update(dt, { x: 0, y: 0, z: 0 }, null);
   }

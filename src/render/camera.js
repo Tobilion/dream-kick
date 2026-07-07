@@ -27,8 +27,10 @@ export class BroadcastCam {
   update(dt, ballPos, ballVel) {
     if (this.mode === 'orbit') {
       this.orbitAngle += C.ORBIT_SPEED * dt;
+      const baseAngle = -Math.PI / 2; // looking down the pitch
+      const driftAngle = baseAngle + Math.sin(this.orbitAngle * 0.2) * (3 * Math.PI / 180);
       const r = 68;
-      this.cam.position.set(Math.cos(this.orbitAngle) * r, 34, Math.sin(this.orbitAngle) * r);
+      this.cam.position.set(Math.cos(driftAngle) * r, 28, Math.sin(driftAngle) * r);
       this.cam.lookAt(0, 2, 0);
       return;
     }

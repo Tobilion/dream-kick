@@ -1,5 +1,5 @@
 /* sw.js — offline cache for Dream Kick v2 */
-const CACHE = 'dreamkick-v2.0.1';
+const CACHE = 'dreamkick-v2.0.2';
 const ASSETS = [
   './',
   './index.html',
@@ -34,6 +34,7 @@ const ASSETS = [
   './src/ui/draw.js',
   './src/ui/screens.js',
   './src/ui/hud.js',
+  './src/ui/components.js',
 ];
 
 self.addEventListener('install', e => {
