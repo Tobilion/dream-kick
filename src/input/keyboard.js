@@ -30,5 +30,6 @@ export class Keyboard {
     r.shoot = k.has('KeyC') || k.has('KeyZ');
     r.switch = k.has('KeyQ') || k.has('Tab');
     r.pause = k.has('Escape') || k.has('KeyP');
+    r.cycleCam = k.has('KeyF') || k.has('KeyR');
   }
 }

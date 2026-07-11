@@ -6,15 +6,15 @@ export class Input {
   constructor() {
     this.raw = {
       moveX: 0, moveZ: 0, mag: 0, sprint: false,
-      pass: false, shoot: false, switch: false, pause: false,
+      pass: false, shoot: false, switch: false, pause: false, cycleCam: false,
     };
     this.state = {
       moveX: 0, moveZ: 0, mag: 0, sprint: false,
       passHeld: false, passReleased: false,
       shootHeld: false, shootReleased: false,
-      switchPressed: false, pausePressed: false,
+      switchPressed: false, pausePressed: false, cycleCamPressed: false,
     };
-    this._prev = { pass: false, shoot: false, switch: false, pause: false };
+    this._prev = { pass: false, shoot: false, switch: false, pause: false, cycleCam: false };
 
     this.keyboard = new Keyboard(this.raw);
     this.isTouch = matchMedia('(pointer:coarse)').matches;
@@ -33,6 +33,7 @@ export class Input {
     s.shootReleased = p.shoot && !r.shoot;
     s.switchPressed = !p.switch && r.switch;
     s.pausePressed = !p.pause && r.pause;
-    p.pass = r.pass; p.shoot = r.shoot; p.switch = r.switch; p.pause = r.pause;
+    s.cycleCamPressed = !p.cycleCam && r.cycleCam;
+    p.pass = r.pass; p.shoot = r.shoot; p.switch = r.switch; p.pause = r.pause; p.cycleCam = r.cycleCam;
   }
 }

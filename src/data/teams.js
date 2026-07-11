@@ -89,7 +89,12 @@ export const CLUBS = CLUB_DEFS.map(buildClub);
  * GK,4 DF,3 MF,3 FW for 4-3-3), best overall first.
  */
 export function pickLineup(club, formation) {
-  const want = formation === '433' ? { GK: 1, DF: 4, MF: 3, FW: 3 } : { GK: 1, DF: 4, MF: 4, FW: 2 };
+  let want = { GK: 1, DF: 4, MF: 4, FW: 2 };
+  if (formation === '433') want = { GK: 1, DF: 4, MF: 3, FW: 3 };
+  else if (formation === '4231') want = { GK: 1, DF: 4, MF: 5, FW: 1 };
+  else if (formation === '352') want = { GK: 1, DF: 3, MF: 5, FW: 2 };
+  else if (formation === '532') want = { GK: 1, DF: 5, MF: 3, FW: 2 };
+
   const byPos = { GK: [], DF: [], MF: [], FW: [] };
   for (const p of club.squad) byPos[p.pos].push(p);
   for (const k of Object.keys(byPos)) byPos[k].sort((a, b) => b.overall - a.overall);

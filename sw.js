@@ -1,5 +1,5 @@
 /* sw.js — offline cache for Dream Kick v2 */
-const CACHE = 'dreamkick-v2.0.2';
+const CACHE = 'dreamkick-v2.3.1'; // bumped: Phase 3 + team-mgmt formation pitch & card layout fixes
 const ASSETS = [
   './',
   './index.html',
@@ -15,6 +15,10 @@ const ASSETS = [
   './src/data/names.js',
   './src/data/teams.js',
   './src/engine/ball.js',
+  './src/engine/ballPhysics.js',
+  './src/engine/possessionSystem.js',
+  './src/engine/passingSystem.js',
+  './src/engine/shootingSystem.js',
   './src/engine/player.js',
   './src/engine/team.js',
   './src/engine/ai.js',
@@ -26,6 +30,7 @@ const ASSETS = [
   './src/render/playerMesh.js',
   './src/render/ballMesh.js',
   './src/render/camera.js',
+  './src/render/cameraController.js',
   './src/render/effects.js',
   './src/input/input.js',
   './src/input/keyboard.js',
@@ -35,6 +40,10 @@ const ASSETS = [
   './src/ui/screens.js',
   './src/ui/hud.js',
   './src/ui/components.js',
+  './src/ui/playerCard.js',
+  './src/ui/lineupIntro.js',
+  './src/ui/teamManagement.js',
+  './src/ui/settingsScreen.js',
 ];
 
 self.addEventListener('install', e => {

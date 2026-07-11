@@ -482,7 +482,88 @@ export class Screens {
     this.setupInteractions(el);
   }
 
+  /* ---------------- half-time overlay ---------------- */
+  halfTime(match, onContinue) {
+    // Remove any existing half-time overlay first
+    document.getElementById('halfTimeOverlay')?.remove();
+
+    const [h, a] = match.teams.map(t => t.club);
+    const pos = match.possessionPct ? match.possessionPct() : [50, 50];
+    const s = match.stats;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'halfTimeOverlay';
+    overlay.style.cssText = `
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: rgba(10,12,16,0.88); backdrop-filter: blur(14px);
+      z-index: 1200; opacity: 0; transition: opacity 0.4s;
+    `;
+    overlay.innerHTML = `
+      <div style="
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: 20px; padding: 32px 48px; min-width: 340px; max-width: 480px;
+        text-align: center; box-shadow: 0 8px 60px rgba(0,0,0,0.7);
+      ">
+        <div style="font-size: 11px; letter-spacing: 3px; color: var(--accent); margin-bottom: 12px; font-weight: 700;">HALF TIME</div>
+        <div style="display: flex; align-items: center; justify-content: center; gap: 24px; margin-bottom: 20px;">
+          <div style="text-align:center">
+            <canvas id="htBadgeH" width="56" height="56"></canvas>
+            <div style="font-size:11px;margin-top:4px;color:var(--muted)">${h.code}</div>
+          </div>
+          <div style="font-size: 48px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text);">
+            ${match.score[0]}&nbsp;<span style="color:var(--muted);">–</span>&nbsp;${match.score[1]}
+          </div>
+          <div style="text-align:center">
+            <canvas id="htBadgeA" width="56" height="56"></canvas>
+            <div style="font-size:11px;margin-top:4px;color:var(--muted)">${a.code}</div>
+          </div>
+        </div>
+        <div style="margin-bottom: 20px;">
+          ${s ? `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
+              <span style="color:var(--text)">${s.shots?.[0] ?? 0}</span>
+              <span style="color:var(--muted)">SHOTS</span>
+              <span style="color:var(--text)">${s.shots?.[1] ?? 0}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:12px;">
+              <span style="color:var(--text)">${Math.round(pos[0])}%</span>
+              <span style="color:var(--muted)">POSSESSION</span>
+              <span style="color:var(--text)">${Math.round(pos[1])}%</span>
+            </div>
+          ` : ''}
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:16px;">SECOND HALF STARTING SHORTLY…</div>
+        <button id="htContinueBtn" style="
+          background: var(--accent); color: #000; border: none; border-radius: 8px;
+          padding: 10px 28px; font-size: 13px; font-weight: 700; letter-spacing: 1px;
+          cursor: pointer; width: 100%; font-family: inherit;
+        ">CONTINUE</button>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.style.opacity = '1');
+
+    const drawBadges = () => {
+      drawBadge(overlay.querySelector('#htBadgeH'), h);
+      drawBadge(overlay.querySelector('#htBadgeA'), a);
+    };
+    setTimeout(drawBadges, 50);
+
+    const dismiss = () => {
+      overlay.style.opacity = '0';
+      setTimeout(() => overlay.remove(), 400);
+      onContinue?.();
+    };
+
+    overlay.querySelector('#htContinueBtn').onclick = dismiss;
+    // Auto-dismiss after a few seconds
+    const autoTimer = setTimeout(dismiss, 3000);
+    overlay.querySelector('#htContinueBtn').addEventListener('click', () => clearTimeout(autoTimer));
+  }
+
   /* ---------------- career / classic mode ---------------- */
+
   career() {
     const el = document.createElement('div');
     el.className = 'screen career-screen';

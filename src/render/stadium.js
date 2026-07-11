@@ -7,13 +7,19 @@ const HALF_L = P.LENGTH / 2, HALF_W = P.WIDTH / 2;
 
 export class Stadium {
   constructor(scene, shadowsOn) {
-    this.group = new THREE.Group();
+    // Clean hierarchy (V2 Phase 2): 'Pitch' = playing surface + goals,
+    // 'Stadium' = stands/roofs/floodlights/ad boards. Players live in a
+    // separate 'PlayersAndBall' group owned by main.js.
+    this.group = new THREE.Group();      this.group.name = 'Stadium';
+    this.pitchGroup = new THREE.Group(); this.pitchGroup.name = 'Pitch';
+    this.standsList = [];
     this.buildPitch(shadowsOn);
     this.buildGoals();
     this.buildAdBoards();
     this.buildStands();
     this.buildFloodlights();
     scene.add(this.group);
+    scene.add(this.pitchGroup);
     this.crowdT = 0; this.crowdFrame = 0;
     this.netPulse = [0, 0];
   }
@@ -88,14 +94,14 @@ export class Stadium {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.rotation.x = -Math.PI / 2;
     mesh.receiveShadow = shadowsOn;
-    this.group.add(mesh);
+    this.pitchGroup.add(mesh);
 
     // outer apron
     const apron = new THREE.Mesh(
       new THREE.PlaneGeometry(P.LENGTH + 90, P.WIDTH + 90),
       new THREE.MeshLambertMaterial({ color: 0x11361c }));
     apron.rotation.x = -Math.PI / 2; apron.position.y = -0.02;
-    this.group.add(apron);
+    this.pitchGroup.add(apron);
   }
 
   /* ---------------- goals & nets ---------------- */
@@ -135,7 +141,7 @@ export class Stadium {
       const net = new THREE.LineSegments(geo, netMat);
       goal.add(net);
       this.nets.push(net);
-      this.group.add(goal);
+      this.pitchGroup.add(goal);
     }
   }
 
@@ -213,13 +219,21 @@ export class Stadium {
       roof.position.set(0, 17.4, 11.5); grp.add(roof);
       grp.position.set(x, 0, z); grp.rotation.y = ry;
       this.group.add(grp);
+      this.standsList.push(grp);
     };
 
-    const dNS = HALF_W + P.MARGIN + 4, dEW = HALF_L + P.MARGIN + 4;
-    stand(P.LENGTH + 26, 0, dNS, Math.PI, 6);
-    stand(P.LENGTH + 26, 0, -dNS, 0, 6);
-    stand(P.WIDTH + 20, dEW, 0, Math.PI / 2, 4);
-    stand(P.WIDTH + 20, -dEW, 0, -Math.PI / 2, 4);
+    // V2 Phase 2: each stand's local geometry spans z ≈ -1 .. +16, and the
+    // group rotation flips local +z TOWARD the pitch. So a stand anchored at
+    // distance d covers world  d-16 .. d+1  on its axis. The old d = boundary+4
+    // put roofs ~12m OVER the pitch. Anchor at boundary+16.5 so the innermost
+    // point (the roof edge) sits just outside pitch + margin.
+    const STAND_DEPTH = 16.5;
+    const dNS = HALF_W + P.MARGIN + STAND_DEPTH;   // 34+6+16.5 = 56.5
+    const dEW = HALF_L + P.MARGIN + STAND_DEPTH;   // 52.5+6+16.5 = 75
+    stand(P.LENGTH + 60, 0, dNS, Math.PI, 6);
+    stand(P.LENGTH + 60, 0, -dNS, 0, 6);
+    stand(P.WIDTH + 60, dEW, 0, Math.PI / 2, 4);
+    stand(P.WIDTH + 60, -dEW, 0, -Math.PI / 2, 4);
   }
 
   buildFloodlights() {
@@ -244,7 +258,7 @@ export class Stadium {
     }
   }
 
-  update(dt) {
+  update(dt, cameraPos) {
     // crowd shimmer
     this.crowdT += dt;
     if (this.crowdT > 1 / CONFIG.RENDER.CROWD_FPS) {
@@ -265,5 +279,9 @@ export class Stadium {
         net.scale.set(1, s, s);
       }
     }
+
+    // NOTE: view-obstruction culling of stands is owned by CameraController
+    // (raycast-based, src/render/cameraController.js) — do not re-toggle
+    // stand.visible here or the two systems will fight.
   }
 }

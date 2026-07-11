@@ -1,35 +1,55 @@
-/** match.js — match orchestrator: phases, possession, actions, stats. */
+/** match.js — MatchEngine: FSM states, fixed game loop, rules, stats, settings hooks.
+ *  V2 Phase 3: drives BallPhysics / PossessionSystem / PassingSystem / ShootingSystem. */
 import { CONFIG } from '../core/config.js';
-import { clamp, dist2, norm2, dot2 } from '../core/math.js';
-import { Ball } from './ball.js';
+import { clamp, dist2, norm2, makeRng } from '../core/math.js';
+import { BallPhysics } from './ballPhysics.js';
 import { Team } from './team.js';
 import { PSTATE } from './player.js';
 import { updateAI, bestPass } from './ai.js';
 import { updateGoalkeepers } from './goalkeeper.js';
 import { checkBoundaries, restartBallSpot, restartTaker } from './rules.js';
+import { PossessionSystem } from './possessionSystem.js';
+import { PassingSystem } from './passingSystem.js';
+import { ShootingSystem } from './shootingSystem.js';
 
-const P = CONFIG.PLAYER, M = CONFIG.MATCH, PITCH = CONFIG.PITCH;
-const HALF_L = PITCH.LENGTH / 2, HALF_W = PITCH.WIDTH / 2;
+const M = CONFIG.MATCH;
+const P = CONFIG.PLAYER;
+const PITCH = CONFIG.PITCH;
+const HALF_L = PITCH.LENGTH / 2;
+const HALF_W = PITCH.WIDTH / 2;
+
+export const MATCH_STATE = {
+  PRE_MATCH: 'PRE_MATCH',
+  LINEUP_INTRO: 'LINEUP_INTRO',
+  KICKOFF: 'KICKOFF',
+  FIRST_HALF: 'FIRST_HALF',
+  HALF_TIME: 'HALF_TIME',
+  SECOND_HALF: 'SECOND_HALF',
+  FULL_TIME: 'FULL_TIME',
+  PAUSED: 'PAUSED'
+};
 
 export class Match {
-  /**
-   * @param {object} opts {homeClub, awayClub, userTeam, difficulty, halfLength, events}
-   * events: {onGoal, onPhase, onRestart, onKick, onCommentary, onFullTime}
-   */
   constructor(opts) {
-    this.teams = [new Team(opts.homeClub, 0, '442'), new Team(opts.awayClub, 1, '433')];
+    this.teams = [
+      new Team(opts.homeClub, 0, opts.homeClub.formation || '442'), 
+      new Team(opts.awayClub, 1, opts.awayClub.formation || '433')
+    ];
     this.userTeam = opts.userTeam ?? 0;
     this.diffParams = CONFIG.DIFFICULTY[opts.difficulty || 'pro'];
     this.halfLength = opts.halfLength || 180;
     this.events = opts.events || {};
 
-    this.ball = new Ball();
-    this.owner = null;            // player currently dribbling
-    this.controlled = null;       // user-controlled player
-    this.phase = 'KICKOFF';
+    this.ball = new BallPhysics();
+    this.rng = makeRng(opts.seed ?? ((Date.now() & 0xffffff) ^ 0x9e3779));
+    this.owner = null;
+    this.controlled = null;
+    
+    this.state = MATCH_STATE.PRE_MATCH;
+    this.phase = 'OPEN_PLAY'; // pitch sub-phase (OPEN_PLAY, THROW_IN, etc.)
     this.phaseT = 0;
     this.half = 1;
-    this.clock = 0;               // real seconds elapsed in current half
+    this.clock = 0;
     this.score = [0, 0];
     this.scorers = [[], []];
     this.paused = false;
@@ -38,14 +58,19 @@ export class Match {
       possession: [0.0001, 0.0001], shots: [0, 0], onTarget: [0, 0],
       passes: [0, 0], passOk: [0, 0], tackles: [0, 0],
     };
-    this.pendingPass = null;      // {team} for pass accuracy tracking
-    this.shotCharge = 0; this.passCharge = 0;
+    this.pendingPass = null;
+    this.shotCharge = 0; 
+    this.passCharge = 0;
     this.restartInfo = null;
+    this._resumeFromHalf = false;
 
-    this.setupKickoff(0);
+    this.possessionSystem = new PossessionSystem();
+    this._opts = opts;
+
+    // Start in PRE_MATCH state
+    this.go(MATCH_STATE.PRE_MATCH);
   }
 
-  /* ---------- clock helpers ---------- */
   get matchClockSeconds() {
     const perHalf = M.CLOCK_MINUTES_PER_HALF * 60;
     const frac = clamp(this.clock / this.halfLength, 0, 1);
@@ -53,10 +78,42 @@ export class Match {
   }
   get displayMinute() { return Math.floor(this.matchClockSeconds / 60); }
 
-  /* ---------- phase control ---------- */
-  setPhase(phase, info) {
-    this.phase = phase; this.phaseT = 0;
-    this.events.onPhase?.(phase, info);
+  go(state) {
+    // Pause is an overlay: freeze/unfreeze without changing underlying state
+    if (state === MATCH_STATE.PAUSED) {
+      this._prevState = this.state;
+      this.state = MATCH_STATE.PAUSED;
+      this.paused = true;
+      this.events.onStateChange?.(state);
+      return;
+    }
+    if (state === 'UNPAUSE') {
+      this.state = this._prevState || MATCH_STATE.FIRST_HALF;
+      this.paused = false;
+      this.events.onStateChange?.(this.state);
+      return;
+    }
+
+    const prev = this.state;
+    this.state = state;
+    this.phaseT = 0;
+    this.events.onStateChange?.(state);
+
+    if (state === MATCH_STATE.KICKOFF) {
+      // Determine kicking team: home kicks off 1st half, away kicks off 2nd half
+      const kicker = this.half === 1 ? 0 : 1;
+      this.setupKickoff(kicker);
+    } else if (state === MATCH_STATE.HALF_TIME) {
+      this.events.onCommentary?.('Half time!');
+      this.events.onPhase?.('HALF_TIME');
+      // UI overlay (shown by main.js onStateChange) will call startSecondHalf()
+    } else if (state === MATCH_STATE.SECOND_HALF) {
+      this.half = 2;
+      this.clock = 0;
+      for (const t of this.teams) t.attackDir *= -1;
+    } else if (state === MATCH_STATE.FULL_TIME) {
+      this.events.onFullTime?.();
+    }
   }
 
   setupKickoff(kickingTeam) {
@@ -66,7 +123,7 @@ export class Match {
     this.teams[1].resetPositions(kickingTeam === 1);
     this.kickoffTeam = kickingTeam;
     this.controlled = this.nearestToBall(this.userTeam, true);
-    this.setPhase('KICKOFF');
+    this.phase = 'KICKOFF';
   }
 
   setupRestart(event) {
@@ -75,12 +132,9 @@ export class Match {
     this.owner = null;
     const taker = restartTaker(event, this, spot);
     this.restartInfo = { event, taker, spot };
-    if (event.team === this.userTeam || event.team === undefined) {
-      this.controlled = taker;
-    } else {
-      this.controlled = this.nearestToBall(this.userTeam, true);
-    }
-    this.setPhase(event.type, event);
+    this.controlled = (event.team === this.userTeam || event.team === undefined) 
+      ? taker : this.nearestToBall(this.userTeam, true);
+    this.phase = event.type;
     this.events.onRestart?.(event);
   }
 
@@ -94,71 +148,77 @@ export class Match {
     return best;
   }
 
-  /* ---------- main update (fixed dt) ---------- */
   update(dt, input) {
-    if (this.paused) return;
+    if (this.state === MATCH_STATE.PAUSED || this.paused) return;
     this.phaseT += dt;
 
-    switch (this.phase) {
-      case 'KICKOFF':
-        if (this.phaseT >= M.KICKOFF_DELAY) {
-          const t = this.teams[this.kickoffTeam];
-          const taker = this.nearestToBall(this.kickoffTeam, true);
-          const mate = bestPass(this, t, taker);
-          this.ball.lastTouch = taker; this.ball.lastTeam = this.kickoffTeam;
-          if (mate) this.aiPass(taker, mate.mate, false, 0.05);
-          else this.ball.kick(norm2(-t.attackDir, 0.3), 9, 0, 0);
-          this.setPhase('OPEN_PLAY');
+    // Tick entity logic & simulation elements
+    if (this.state === MATCH_STATE.KICKOFF) {
+      if (this.phaseT >= M.KICKOFF_DELAY) {
+        const t = this.teams[this.kickoffTeam];
+        const taker = this.nearestToBall(this.kickoffTeam, true);
+        const mate = PassingSystem.bestTarget(this, t, taker);
+        this.ball.lastTouch = taker;
+        this.ball.lastTeam = this.kickoffTeam;
+        if (mate) {
+          PassingSystem.aiPass(this, taker, mate.mate, false);
+        } else {
+          this.ball.kick(norm2(-t.attackDir, 0.3), 9, 0, 0);
         }
-        break;
-
-      case 'THROW_IN': case 'CORNER': case 'GOAL_KICK': case 'FREE_KICK':
+        this.phase = 'OPEN_PLAY';
+        this.go(this.half === 1 ? MATCH_STATE.FIRST_HALF : MATCH_STATE.SECOND_HALF);
+      }
+    } else if (this.state === MATCH_STATE.HALF_TIME) {
+      // Wait for overlay callback (resumeFromHalfTime) to start second half
+      if (this._resumeFromHalf) {
+        this._resumeFromHalf = false;
+        this.go(MATCH_STATE.SECOND_HALF);
+        this.go(MATCH_STATE.KICKOFF);
+      }
+    } else if (this.state === MATCH_STATE.FIRST_HALF || this.state === MATCH_STATE.SECOND_HALF) {
+      if (this.phase === 'THROW_IN' || this.phase === 'CORNER' || this.phase === 'GOAL_KICK' || this.phase === 'FREE_KICK') {
         this.updateRestart(dt, input);
-        break;
-
-      case 'GOAL_CELEBRATION':
-        if (this.phaseT >= M.GOAL_CELEBRATION) {
-          for (const t of this.teams) for (const p of t.players) if (p.state === PSTATE.CELEBRATE) p.state = PSTATE.NORMAL;
-          this.setupKickoff(1 - this.lastScoringTeam);
-        }
-        break;
-
-      case 'HALF_TIME':
-        if (this.phaseT >= M.HALFTIME_PAUSE) {
-          this.half = 2; this.clock = 0;
-          for (const t of this.teams) t.attackDir *= -1;
-          this.setupKickoff(1); // away kicks off 2nd half
-        }
-        break;
-
-      case 'FULL_TIME':
-        return;
-
-      case 'OPEN_PLAY':
+      } else if (this.phase === 'OPEN_PLAY') {
         this.updateOpenPlay(dt, input);
-        break;
-    }
-
-    if (this.phase === 'OPEN_PLAY' || this.phase === 'GOAL_CELEBRATION') {
-      this.ball.update(dt);
-    }
-    for (const t of this.teams) for (const p of t.players) p.update(dt);
-    this.keepInBoundsPlayers();
-
-    if (this.phase === 'OPEN_PLAY') {
-      this.clock += dt;
-      if (this.clock >= this.halfLength) {
-        if (this.half === 1) { this.setPhase('HALF_TIME'); this.events.onCommentary?.('Half time!'); }
-        else { this.setPhase('FULL_TIME'); this.events.onFullTime?.(); }
+        this.clock += dt;
+        if (this.clock >= this.halfLength) {
+          if (this.half === 1) this.go(MATCH_STATE.HALF_TIME);
+          else this.go(MATCH_STATE.FULL_TIME);
+        }
+      } else if (this.phase === 'GOAL_CELEBRATION') {
+        if (this.phaseT >= M.GOAL_CELEBRATION) {
+          for (const t of this.teams) {
+            for (const p of t.players) {
+              if (p.state === PSTATE.CELEBRATE) p.state = PSTATE.NORMAL;
+            }
+          }
+          this.go(MATCH_STATE.KICKOFF);
+        }
       }
     }
+
+    // Only simulate entities during active match states
+    if (this.state === MATCH_STATE.KICKOFF || this.state === MATCH_STATE.FIRST_HALF ||
+        this.state === MATCH_STATE.SECOND_HALF || this.state === MATCH_STATE.HALF_TIME) {
+      if (this.phase === 'OPEN_PLAY' || this.phase === 'GOAL_CELEBRATION') {
+        this.ball.update(dt, this.allPlayers());
+      }
+      for (const t of this.teams) {
+        for (const p of t.players) p.update(dt);
+      }
+      this.keepInBoundsPlayers();
+    }
+  }
+
+  allPlayers() {
+    return [...this.teams[0].players, ...this.teams[1].players];
   }
 
   updateOpenPlay(dt, input) {
     this.applyUserInput(dt, input);
     updateAI(this, dt);
     updateGoalkeepers(this, dt);
-    this.updatePossession(dt);
+    this.possessionSystem.update(this, dt);
     const ev = checkBoundaries(this);
     if (ev) {
       if (ev.type === 'GOAL') this.onGoal(ev.scoringTeam);
@@ -191,19 +251,20 @@ export class Match {
   }
 
   takeRestart(taker, event) {
-    this.ball.lastTouch = taker; this.ball.lastTeam = taker.team;
+    this.ball.lastTouch = taker;
+    this.ball.lastTeam = taker.team;
     const team = this.teams[taker.team];
-    const mate = bestPass(this, team, taker);
+    const mate = PassingSystem.bestTarget(this, team, taker);
     if (event.type === 'CORNER') {
       const dir = norm2(team.goalX - taker.pos.x, -taker.pos.z * 0.85);
       this.ball.kick(dir, 19, 7.5, Math.sign(taker.pos.z) * 3.2);
       this.events.onKick?.('cross');
     } else if (mate) {
-      this.aiPass(taker, mate.mate, false, 0.06);
+      PassingSystem.aiPass(this, taker, mate.mate, false);
     } else {
       this.ball.kick(norm2(team.attackDir, 0), 14, 4, 0);
     }
-    this.setPhase('OPEN_PLAY');
+    this.phase = 'OPEN_PLAY';
   }
 
   onGoal(scoringTeam) {
@@ -212,86 +273,43 @@ export class Match {
     const scorer = this.ball.lastTouch && this.ball.lastTouch.team === scoringTeam
       ? this.ball.lastTouch : this.teams[scoringTeam].players[9];
     this.scorers[scoringTeam].push({ name: scorer.data.name, minute: this.displayMinute || 1 });
-    // a goal always counts as a shot on target (covers deflections/own-half punts)
     this.stats.onTarget[scoringTeam]++;
     if (this.stats.onTarget[scoringTeam] > this.stats.shots[scoringTeam]) {
       this.stats.shots[scoringTeam] = this.stats.onTarget[scoringTeam];
     }
     for (const p of this.teams[scoringTeam].players) p.act(PSTATE.CELEBRATE, M.GOAL_CELEBRATION);
-    this.setPhase('GOAL_CELEBRATION');
+    this.phase = 'GOAL_CELEBRATION';
     this.events.onGoal?.(scoringTeam, scorer, this.displayMinute || 1);
   }
 
-  /* ---------- possession / touches ---------- */
-  updatePossession(dt) {
-    const b = this.ball;
-    if (b.pos.y > 1.6) { this.owner = null; }
-
-    let taker = null, bd = 1e9;
-    for (const t of this.teams) {
-      for (const p of t.players) {
-        if (!p.canPlay || p.controlCooldown > 0) continue;
-        const d = dist2(p.pos.x, p.pos.z, b.pos.x, b.pos.z);
-        const reach = P.CONTROL_RADIUS + (p.isGK ? 0.5 : 0);
-        if (d < reach && b.pos.y < 1.6 && d < bd) { bd = d; taker = p; }
-      }
-    }
-
-    if (taker) {
-      const stealing = this.owner && this.owner !== taker && this.owner.team !== taker.team;
-      if (!this.owner || this.owner === taker || stealing) {
-        if (stealing) this.stats.tackles[taker.team]++;
-        this.owner = taker;
-        b.lastTouch = taker; b.lastTeam = taker.team;
-        b.spin = 0;
-        const sp = taker.speed;
-        if (sp > 0.8) {
-          const dir = norm2(taker.vel.x, taker.vel.z);
-          const spacing = P.TOUCH_SPACING * (taker.sprinting ? P.SPRINT_TOUCH_MULT : 1);
-          b.kick(dir, sp + spacing, 0, 0);
-          taker.controlCooldown = 0.16;
-        } else {
-          b.vel.x *= 0.2; b.vel.z *= 0.2;
-        }
-        // auto-switch cursor on interception by user team
-        if (M.AUTO_SWITCH && taker.team === this.userTeam && this.phase === 'OPEN_PLAY') {
-          if (!this.controlled || !this.controlledHasBall()) this.controlled = taker;
-        }
-        // pass completion stat
-        if (this.pendingPass) {
-          if (taker.team === this.pendingPass.team) this.stats.passOk[this.pendingPass.team]++;
-          this.pendingPass = null;
-        }
-      }
-    } else if (this.owner) {
-      const d = dist2(this.owner.pos.x, this.owner.pos.z, b.pos.x, b.pos.z);
-      if (d > P.CONTROL_RADIUS + 2.4) this.owner = null;
-    }
-  }
-
-  controlledHasBall() { return this.owner && this.owner === this.controlled; }
-
-  /* ---------- user input ---------- */
   applyUserInput(dt, input) {
     if (!input) return;
     const pl = this.controlled;
-    if (!pl || pl.team !== this.userTeam) { this.controlled = this.nearestToBall(this.userTeam, true); return; }
+    if (!pl || pl.team !== this.userTeam) { 
+      this.controlled = this.nearestToBall(this.userTeam, true); 
+      return; 
+    }
 
     if (input.switchPressed) this.switchPlayer();
-
     if (!pl.busy) pl.setMove(input.moveX, input.moveZ, input.mag, input.sprint);
 
-    const hasBall = this.controlledHasBall();
+    const hasBall = pl.hasBall;
+
+    // B off the ball = pressure: close down the carrier (DLS-style)
+    if (input.shootHeld && !hasBall && !pl.busy && this.owner && this.owner.team !== pl.team) {
+      const dir = norm2(this.ball.pos.x - pl.pos.x, this.ball.pos.z - pl.pos.z);
+      pl.setMove(dir.x, dir.z, 1, true);
+    }
 
     if (input.shootHeld && hasBall) this.shotCharge = clamp(this.shotCharge + dt / P.SHOT_CHARGE_TIME, 0, 1);
     if (input.passHeld && hasBall) this.passCharge = clamp(this.passCharge + dt / 0.7, 0, 1);
 
     if (input.shootReleased) {
-      if (hasBall && !pl.busy) this.userShoot(pl, this.shotCharge);
+      if (hasBall && !pl.busy) ShootingSystem.userShoot(this, pl, this.shotCharge);
       this.shotCharge = 0;
     }
     if (input.passReleased) {
-      if (hasBall && !pl.busy) this.userPass(pl, this.passCharge);
+      if (hasBall && !pl.busy) PassingSystem.userPass(this, pl, this.passCharge);
       else if (!hasBall && !pl.busy) this.userTackle(pl, this.passCharge > 0.45);
       this.passCharge = 0;
     }
@@ -309,42 +327,6 @@ export class Match {
     if (best) this.controlled = best;
   }
 
-  userPass(pl, charge) {
-    const team = this.teams[pl.team];
-    const long = charge > 0.55;
-    const aim = (Math.abs(pl.moveInput.mag) > 0.2)
-      ? norm2(pl.moveInput.x, pl.moveInput.z)
-      : { x: Math.cos(pl.facing), z: Math.sin(pl.facing) };
-    let best = null, bs = -1e9;
-    for (const mate of team.players) {
-      if (mate === pl) continue;
-      const dx = mate.pos.x - pl.pos.x, dz = mate.pos.z - pl.pos.z;
-      const d = Math.hypot(dx, dz);
-      if (d < 2 || d > (long ? 48 : 30)) continue;
-      const dir = norm2(dx, dz);
-      const align = dot2(aim.x, aim.z, dir.x, dir.z);
-      if (align < 0.1) continue;
-      const score = align * 2 - d / 40;
-      if (score > bs) { bs = score; best = mate; }
-    }
-    if (!best) best = bestPass(this, team, pl)?.mate;
-    if (!best) return;
-    this.aiPass(pl, best, long, 0.04, true);
-  }
-
-  userShoot(pl, charge) {
-    const team = this.teams[pl.team];
-    const power = P.SHOT_POWER_MIN + (P.SHOT_POWER_MAX - P.SHOT_POWER_MIN) * charge;
-    const acc = pl.data.shoot / 100;
-    const aimZ = clamp((pl.moveInput.mag > 0.2 ? pl.moveInput.z : 0) * (PITCH.GOAL_WIDTH / 2 + 1.5), -PITCH.GOAL_WIDTH / 2 - 1, PITCH.GOAL_WIDTH / 2 + 1);
-    const err = (1 - acc) * (0.6 + charge * 0.9);
-    const tz = aimZ + (Math.random() * 2 - 1) * err * 3.5;
-    const dir = norm2(team.goalX - pl.pos.x, tz - pl.pos.z);
-    const lift = charge * P.SHOT_LIFT_MAX * (0.35 + Math.random() * 0.5);
-    const curl = (pl.moveInput.z || 0) * -2.2;
-    this.strike(pl, dir, power, lift, curl, 'shot');
-  }
-
   userTackle(pl, slide) {
     if (slide) {
       const dir = pl.moveInput.mag > 0.2 ? norm2(pl.moveInput.x, pl.moveInput.z)
@@ -356,112 +338,114 @@ export class Match {
     }
   }
 
-  /* ---------- shared action helpers ---------- */
-  strike(pl, dir, power, lift, curl, kind) {
-    if (dist2(pl.pos.x, pl.pos.z, this.ball.pos.x, this.ball.pos.z) > P.CONTROL_RADIUS + 1.2) return;
-    pl.act(PSTATE.KICKING, P.KICK_DURATION);
-    pl.faceToward(pl.pos.x + dir.x, pl.pos.z + dir.z);
-    pl.controlCooldown = 0.3;
-    this.owner = null;
-    this.ball.lastTouch = pl; this.ball.lastTeam = pl.team;
-    this.ball.pos.y = Math.max(this.ball.pos.y, CONFIG.BALL.RADIUS);
-    this.ball.kick(dir, power, lift, curl);
-    if (kind === 'shot') {
-      this.stats.shots[pl.team]++;
-      const team = this.teams[pl.team];
-      const t = Math.abs((team.goalX - this.ball.pos.x) / (this.ball.vel.x || 1e-6));
-      const zAt = this.ball.pos.z + this.ball.vel.z * t;
-      if (Math.abs(zAt) < PITCH.GOAL_WIDTH / 2 + 0.4 && t < 3) this.stats.onTarget[pl.team]++;
-      this.events.onKick?.('shot', power / P.SHOT_POWER_MAX);
-    } else {
-      this.stats.passes[pl.team]++;
-      this.events.onKick?.(kind);
-    }
-  }
-
-  aiPass(pl, mate, through, noise, isUser = false) {
-    const lead = through ? 6.5 : 2.2;
-    const tx = mate.pos.x + mate.vel.x * 0.4 + (through ? this.teams[pl.team].attackDir * lead : 0);
-    const tz = mate.pos.z + mate.vel.z * 0.4;
-    const d = dist2(pl.pos.x, pl.pos.z, tx, tz);
-    let dir = norm2(tx - pl.pos.x, tz - pl.pos.z);
-    const n = noise * (isUser ? 0.5 : 1) * (1 - pl.data.pass / 130);
-    const ang = Math.atan2(dir.z, dir.x) + (Math.random() * 2 - 1) * n;
-    dir = { x: Math.cos(ang), z: Math.sin(ang) };
-    const long = d > 26;
-    const power = long ? P.LONG_PASS_SPEED : clamp(P.PASS_SPEED_MIN + d * 0.42, P.PASS_SPEED_MIN, P.PASS_SPEED_MAX);
-    const lift = long ? P.LONG_PASS_LIFT : 0;
-    this.pendingPass = { team: pl.team };
-    this.strike(pl, dir, power, lift, 0, long ? 'longpass' : 'pass');
-  }
-
-  aiShoot(pl) {
-    const team = this.teams[pl.team];
-    const d = dist2(pl.pos.x, pl.pos.z, team.goalX, 0);
-    const charge = clamp(d / 26, 0.45, 1);
-    const acc = pl.data.shoot / 100;
-    const tz = (Math.random() * 2 - 1) * (PITCH.GOAL_WIDTH / 2) * (1.35 - acc * 0.5);
-    const dir = norm2(team.goalX - pl.pos.x, tz - pl.pos.z);
-    this.strike(pl, dir, P.SHOT_POWER_MIN + (P.SHOT_POWER_MAX - P.SHOT_POWER_MIN) * charge,
-      charge * P.SHOT_LIFT_MAX * (0.3 + Math.random() * 0.45), (Math.random() * 2 - 1) * 1.6, 'shot');
-  }
-
-  aiClear(pl) {
-    const team = this.teams[pl.team];
-    const dir = norm2(team.attackDir, (Math.random() * 2 - 1) * 0.7);
-    this.strike(pl, dir, 24, 8.5, 0, 'clear');
-  }
-
-  aiTackle(pl) {
-    if (Math.random() < 0.5) this.tryStandingTackle(pl);
-    else {
-      const dir = norm2(this.ball.pos.x - pl.pos.x, this.ball.pos.z - pl.pos.z);
-      pl.act(PSTATE.SLIDING, P.SLIDE_DURATION, dir);
-      this.trySlideWin(pl);
-    }
-  }
-
   tryStandingTackle(pl) {
-    const owner = this.owner;
-    if (!owner || owner.team === pl.team) return;
-    const d = dist2(pl.pos.x, pl.pos.z, this.ball.pos.x, this.ball.pos.z);
-    if (d > P.TACKLE_RANGE) return;
-    const win = 0.45 + (pl.data.defend - owner.data.physical) / 200;
-    if (Math.random() < win) {
-      this.stats.tackles[pl.team]++;
-      this.owner = null;
-      this.ball.lastTouch = pl; this.ball.lastTeam = pl.team;
-      const dir = norm2(pl.pos.x - owner.pos.x, pl.pos.z - owner.pos.z);
-      this.ball.kick(dir, 5.5, 0, 0);
-      this.events.onCommentary?.(`${pl.data.name} wins it back!`);
-    }
+    // Delegated to PossessionSystem — the single tackle-contest code path.
+    this.possessionSystem.attemptTackle(this, pl);
   }
 
   trySlideWin(pl) {
     const owner = this.owner;
+    if (pl.tackleCooldownT > 0) return;
     const d = dist2(pl.pos.x, pl.pos.z, this.ball.pos.x, this.ball.pos.z);
-    if (d < P.SLIDE_RANGE) {
-      const win = owner && owner.team !== pl.team ? 0.55 + (pl.data.defend - 60) / 220 : 0.75;
-      if (Math.random() < win) {
+    if (d >= P.SLIDE_RANGE) return;
+
+    if (owner && owner.team !== pl.team) {
+      const win = clamp(0.5 + (pl.data.defend - owner.data.physical) / 180, 0.2, 0.85);
+      if (this.rng() < win) {
         this.stats.tackles[pl.team]++;
-        if (owner && owner.team !== pl.team) owner.act(PSTATE.FALLEN, P.FALL_DURATION);
-        this.owner = null;
-        this.ball.lastTouch = pl; this.ball.lastTeam = pl.team;
+        owner.act(PSTATE.FALLEN, P.FALL_DURATION);
+        this.possessionSystem.release(this, 0.6);
+        this.ball.lastTouch = pl;
+        this.ball.lastTeam = pl.team;
         this.ball.kick(norm2(pl.slideDir.x, pl.slideDir.z), 8, 0.5, 0);
-      } else if (owner && owner.team !== pl.team) {
+        pl.controlCooldown = 0.25;
+      } else {
+        pl.tackleCooldownT = P.RETACKLE_COOLDOWN;
         this.events.onCommentary?.('Foul! Free kick.');
         this.setupRestart({ type: 'FREE_KICK', team: owner.team, x: this.ball.pos.x, z: this.ball.pos.z });
       }
+    } else if (!owner) {
+      // sliding at a loose ball just knocks it on
+      this.ball.lastTouch = pl;
+      this.ball.lastTeam = pl.team;
+      this.ball.kick(norm2(pl.slideDir.x, pl.slideDir.z), 8, 0.5, 0);
+      pl.controlCooldown = 0.25;
     }
+  }
+
+  /* ---------------- AI action delegates (same systems as the user) ---------------- */
+
+  aiPass(pl, mate, through) {
+    PassingSystem.aiPass(this, pl, mate, through);
+  }
+
+  aiShoot(pl) {
+    ShootingSystem.aiShoot(this, pl);
+  }
+
+  aiClear(pl) {
+    ShootingSystem.clear(this, pl);
+  }
+
+  aiTackle(pl) {
+    this.possessionSystem.attemptTackle(this, pl);
   }
 
   gkClaim(gk) {
     this.owner = gk;
-    this.ball.lastTouch = gk; this.ball.lastTeam = gk.team;
+    gk.hasBall = true;
+    this.ball.lastTouch = gk; 
+    this.ball.lastTeam = gk.team;
     this.ball.reset(gk.pos.x, gk.pos.z);
     this.ball.pos.y = 1.0;
     gk.holdT = 0;
     this.events.onCommentary?.(`Great save by ${gk.data.name}!`);
+  }
+
+  resumeFromHalfTime() {
+    if (this.state === MATCH_STATE.HALF_TIME) this._resumeFromHalf = true;
+  }
+
+  simToEnd() {
+    const remainingTime = this.halfLength * (3 - this.half) - this.clock;
+    const minutesRemaining = Math.max(1, Math.round((remainingTime / this.halfLength) * 45));
+    const hClub = this.teams[0].club;
+    const aClub = this.teams[1].club;
+    
+    for (let m = 0; m < minutesRemaining; m++) {
+      const hp = 0.015 + (hClub.rating - aClub.rating) * 0.001;
+      const ap = 0.015 + (aClub.rating - hClub.rating) * 0.001;
+      const minute = Math.min(90, this.displayMinute + m);
+      if (Math.random() < hp) {
+        this.score[0]++;
+        const scorer = this.teams[0].players[Math.floor(Math.random() * 11)];
+        this.scorers[0].push({ name: scorer.data.name, minute });
+      }
+      if (Math.random() < ap) {
+        this.score[1]++;
+        const scorer = this.teams[1].players[Math.floor(Math.random() * 11)];
+        this.scorers[1].push({ name: scorer.data.name, minute });
+      }
+    }
+    
+    for (let i = 0; i < 2; i++) {
+      this.stats.passes[i] += Math.round(minutesRemaining * (4 + Math.random() * 3));
+      this.stats.passOk[i] += Math.round(this.stats.passes[i] * (0.65 + Math.random() * 0.15));
+      this.stats.tackles[i] += Math.round(minutesRemaining * (1.2 + Math.random() * 1.5));
+      this.stats.shots[i] += Math.round(minutesRemaining * (0.15 + Math.random() * 0.2));
+    }
+    
+    this.half = 2;
+    this.clock = this.halfLength;
+    this.go(MATCH_STATE.FULL_TIME);
+  }
+
+  forfeit() {
+    this.score[1] = Math.max(3, this.score[1]);
+    this.score[0] = 0;
+    this.half = 2;
+    this.clock = this.halfLength;
+    this.go(MATCH_STATE.FULL_TIME);
   }
 
   keepInBoundsPlayers() {
@@ -473,7 +457,6 @@ export class Match {
     }
   }
 
-  /** possession percentages for HUD/results */
   possessionPct() {
     const tot = this.stats.possession[0] + this.stats.possession[1];
     const h = Math.round((this.stats.possession[0] / tot) * 100);

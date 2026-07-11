@@ -19,8 +19,12 @@ export const CONFIG = {
     GROUND_FRICTION: 1.4,  // per-second fraction lost rolling
     RESTITUTION: 0.55,     // bounce energy retention
     STOP_SPEED: 0.25,
-    MAGNUS: 5.2,           // curl strength factor
+    MAGNUS: 5.2,           // curl strength factor (deterministic, from kick arg only)
     SPIN_DECAY: 1.6,
+    MAX_SPEED: 38,         // hard cap on ground speed
+    KICK_GRACE: 0.25,      // seconds the kicker can't re-collide with own kick
+    BLOCK_DAMP_FAST: 0.45, // velocity kept when a fast ball hits a body
+    BLOCK_DAMP_SLOW: 0.22, // velocity kept when a slow ball hits a body (control)
   },
 
   PLAYER: {
@@ -34,6 +38,11 @@ export const CONFIG = {
     SPRINT_TOUCH_MULT: 1.55,
     STAMINA_MAX: 100, SPRINT_DRAIN: 7.5, STAMINA_REGEN: 4.5,
     TIRED_SPEED_PENALTY: 0.82, // multiplier when stamina < 20
+    DRIBBLE_OFFSET: 0.6,    // ball carried this far ahead of feet
+    DRIBBLE_SPEED_MULT: 0.87, // dribble speed vs off-ball speed (DLS ~85-90%)
+    FIRST_TOUCH_TIME: 0.22, // control delay when receiving a pass
+    RETACKLE_COOLDOWN: 1.5, // failed tackler locked out this long
+    PASS_ARRIVE_SPEED: 5.5, // ground passes arrive with this residual speed
     TACKLE_RANGE: 1.5, SLIDE_RANGE: 2.6, SLIDE_SPEED: 9.5,
     SLIDE_DURATION: 0.55, SLIDE_RECOVERY: 0.9,
     KICK_DURATION: 0.38, FALL_DURATION: 1.1,
@@ -65,12 +74,21 @@ export const CONFIG = {
   },
 
   CAMERA: {
-    FOV: 38, HEIGHT: 46, DISTANCE: 52,
-    LERP: 3.2, LOOKAHEAD: 6,
-    AIR_ZOOM: 8,           // extra pullback when ball is high
-    GOAL_ZOOM: 10,         // push-in near goals
+    // V2 CameraController (DLS-style). Angles: atan(HEIGHT/DIST).
+    FOV: 50,
+    DIST_MIN: 0.8, DIST_MAX: 1.3,     // Camera Distance setting range (80–130%)
+    FOLLOW_RATE: 4.2,                 // look-target damping rate
+    POSITION_RATE: 3.4,               // camera position damping rate
+    LOOKAHEAD_TIME: 0.55,             // seconds of ball velocity to lead by
+    AIR_ZOOM: 5,                      // extra pullback when ball is high
     SHAKE_DECAY: 6,
-    ORBIT_SPEED: 0.35,     // celebration / menu orbit
+    ORBIT_SPEED: 0.35,                // celebration / menu orbit
+    OCCLUSION_INTERVAL: 0.25,         // seconds between occlusion ray sweeps
+
+    SIDELINE:   { HEIGHT: 12, DIST: 22 },          // ~28.6° pitch angle, ~1/3 pitch framed
+    BROADCAST:  { HEIGHT: 26, DIST: 40 },          // ~33° high TV gantry
+    TOPDOWN:    { HEIGHT: 58, TILT_OFFSET: 6 },    // classic bird's-eye
+    END_TO_END: { HEIGHT: 20, BEHIND_GOAL: 16 },   // behind defended goal
   },
 
   MATCH: {

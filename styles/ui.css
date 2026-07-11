@@ -422,12 +422,18 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 #pauseOverlay { position: absolute; inset: 0; background: rgba(7,9,18,0.82); backdrop-filter: blur(8px);
   display: none; align-items: center; justify-content: center; }
 #pauseOverlay.on { display: flex; }
-.pause-panel { display: flex; flex-direction: column; gap: 10px; min-width: 280px; }
-.pause-title { font-size: 34px; font-weight: 900; letter-spacing: 8px; text-align: center; margin-bottom: 14px; }
-.pause-panel button { background: var(--surface); color: var(--text); border: 1px solid var(--border);
-  border-left: 4px solid transparent; padding: 15px 22px; font: 700 14px/1 inherit; font-family: inherit;
-  letter-spacing: 2px; cursor: pointer; text-align: left; transition: border-color .15s, background .15s, transform 0.15s; }
-.pause-panel button:hover { border-left-color: var(--accent); background: var(--surface-2); transform: translateX(4px); }
+.pause-panel { display: flex; flex-direction: column; gap: 8px; min-width: 300px; }
+.pause-title { font-size: 34px; font-weight: 900; letter-spacing: 8px; text-align: center; margin-bottom: 14px;
+  color: var(--text); }
+.pause-panel button { display: flex; align-items: center; gap: 10px; background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-left: 4px solid transparent; padding: 14px 22px;
+  font: 700 14px/1 inherit; font-family: inherit; letter-spacing: 1.5px; cursor: pointer; text-align: left;
+  transform: skewX(var(--skew)); border-radius: 4px;
+  transition: border-color .15s, background .15s, transform .15s; }
+.pause-panel button > * { transform: skewX(calc(var(--skew) * -1)); }
+.pause-panel button:hover { border-left-color: var(--accent); border-color: var(--accent);
+  background: var(--surface-2); transform: skewX(var(--skew)) translateX(4px);
+  box-shadow: 0 0 15px rgba(0,212,163,0.12); }
 
 /* ---------- Toast System ---------- */
 #toast-container {
@@ -716,3 +722,41 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   .vs-divider span { transform: skewX(var(--skew)) rotate(0); padding: 6px 22px; }
   .scorers-row { gap: 24px; }
 }
+
+/* ---------- player cards (lineup intro, team management, results) ---------- */
+.player-card {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: var(--surface-2, rgba(16,24,40,0.92));
+  border: 1.5px solid var(--border, rgba(255,255,255,0.12));
+  border-radius: 10px; padding: 10px 14px; min-width: 92px;
+  position: relative; user-select: none;
+}
+.player-card.active { border-color: var(--accent, #00d4a3); box-shadow: 0 0 0 2px var(--accent, #00d4a3) inset; }
+.player-card .card-num {
+  position: absolute; top: -8px; left: -8px;
+  min-width: 24px; height: 24px; padding: 0 6px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px; font-size: 12px; font-weight: 900;
+  border: 1.5px solid rgba(0,0,0,0.35);
+}
+.player-card .card-avatar { border-radius: 8px; background: rgba(0,0,0,0.3); }
+.player-card .card-info { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.player-card .card-name { font-weight: 800; font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px; }
+.player-card .card-stats-row { display: flex; gap: 8px; font-size: 11px; }
+.player-card .card-pos { color: var(--muted, #8891b3); font-weight: 700; }
+.player-card .card-rating { color: var(--accent, #00d4a3); font-weight: 900; }
+.lineup-intro-screen .intro-card { animation: fadeUpIn 0.45s var(--ease, ease-out) both; }
+
+/* compact card variant (formation pitch views) */
+.player-card.compact { min-width: 66px; max-width: 84px; padding: 6px 8px; gap: 3px; border-radius: 8px; }
+.player-card.compact .card-avatar { width: 34px; height: 34px; }
+.player-card.compact .card-name { font-size: 10px; max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-card.compact .card-stats-row { font-size: 9px; gap: 5px; }
+.player-card.compact .card-num { min-width: 18px; height: 18px; font-size: 10px; top: -6px; left: -6px; }
+
+/* horizontal bench-row card variant */
+.player-card.rowcard { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; padding: 6px 10px; min-width: 0; width: 100%; }
+.player-card.rowcard .card-num { position: static; flex: 0 0 auto; }
+.player-card.rowcard .card-avatar { width: 34px; height: 34px; flex: 0 0 auto; }
+.player-card.rowcard .card-info { flex: 1; min-width: 0; flex-direction: row; justify-content: space-between; align-items: center; gap: 8px; }
+.player-card.rowcard .card-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

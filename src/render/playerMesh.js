@@ -181,6 +181,16 @@ export class PlayerMesh {
     this.legL.kneeJ.rotation.z += (llK - this.legL.kneeJ.rotation.z) * k;
     this.legR.kneeJ.rotation.z += (rlK - this.legR.kneeJ.rotation.z) * k;
   }
+
+  updateAppearance(kit) {
+    const skinColor = SKIN_TONES[this.e.data.skin % SKIN_TONES.length];
+    this.head.material.color.set(skinColor);
+    
+    // Re-bind shirt number decal
+    const numTex = makeNumberTexture(this.e.data.num, kit[0], kit[1]);
+    this.torso.material[5].map = numTex;
+    this.torso.material[5].needsUpdate = true;
+  }
 }
 
 /** shirt-back number as a canvas texture */

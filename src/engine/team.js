@@ -11,7 +11,7 @@ const HALF_L = PITCH.LENGTH / 2, HALF_W = PITCH.WIDTH / 2;
  * Formation templates in normalized coords:
  * x: 0 = own goal line, 1 = opponent goal line; z: -1..1 across width.
  */
-const FORMATIONS = {
+export const FORMATIONS = {
   '442': [
     { x: 0.04, z: 0 },                                       // GK
     { x: 0.22, z: -0.72 }, { x: 0.18, z: -0.25 }, { x: 0.18, z: 0.25 }, { x: 0.22, z: 0.72 }, // DF
@@ -24,13 +24,32 @@ const FORMATIONS = {
     { x: 0.42, z: -0.4 }, { x: 0.38, z: 0 }, { x: 0.42, z: 0.4 },
     { x: 0.68, z: -0.6 }, { x: 0.72, z: 0 }, { x: 0.68, z: 0.6 },
   ],
+  '4231': [
+    { x: 0.04, z: 0 },
+    { x: 0.22, z: -0.72 }, { x: 0.18, z: -0.25 }, { x: 0.18, z: 0.25 }, { x: 0.22, z: 0.72 }, // DF
+    { x: 0.36, z: -0.3 }, { x: 0.36, z: 0.3 },               // DM
+    { x: 0.54, z: -0.65 }, { x: 0.56, z: 0 }, { x: 0.54, z: 0.65 }, // AM
+    { x: 0.72, z: 0 }                                         // FW
+  ],
+  '352': [
+    { x: 0.04, z: 0 },
+    { x: 0.2, z: -0.45 }, { x: 0.18, z: 0 }, { x: 0.2, z: 0.45 }, // DF
+    { x: 0.42, z: -0.75 }, { x: 0.38, z: -0.25 }, { x: 0.38, z: 0.25 }, { x: 0.42, z: 0.75 }, { x: 0.54, z: 0 }, // MF
+    { x: 0.68, z: -0.22 }, { x: 0.68, z: 0.22 }               // FW
+  ],
+  '532': [
+    { x: 0.04, z: 0 },
+    { x: 0.24, z: -0.76 }, { x: 0.2, z: -0.38 }, { x: 0.18, z: 0 }, { x: 0.2, z: 0.38 }, { x: 0.24, z: 0.76 }, // DF
+    { x: 0.44, z: -0.35 }, { x: 0.4, z: 0 }, { x: 0.44, z: 0.35 }, // MF
+    { x: 0.68, z: -0.22 }, { x: 0.68, z: 0.22 }               // FW
+  ]
 };
 
 export class Team {
   /**
    * @param {object} club club data from teams.js
    * @param {number} index 0 home / 1 away
-   * @param {string} formation '442' | '433'
+   * @param {string} formation '442' | '433' | '4231' | '352' | '532'
    */
   constructor(club, index, formation = '442') {
     this.club = club;
@@ -40,6 +59,8 @@ export class Team {
     this.lineup = pickLineup(club, formation);
     this.players = this.lineup.map((p, i) => new PlayerEntity(p, index, i));
     this.gk = this.players[0];
+    this.mentality = 'balanced';            // 'defensive' | 'balanced' | 'attacking'
+    this.pressingIntensity = 'mid';         // 'low' | 'mid' | 'high'
   }
 
   /** World-space anchor for formation slot i given tactical context. */
@@ -53,7 +74,11 @@ export class Team {
 
     // whole-team push/drop with ball position
     const ballAdv = clamp(ballX * dir / HALF_L, -1, 1); // -1 deep in our half .. 1 at their goal
-    const push = CONFIG.AI.LINE_DEPTH_SHIFT * (inPossession ? 0.55 + 0.45 * ballAdv : 0.25 + 0.55 * ballAdv);
+    let mentalityFactor = 1.0;
+    if (this.mentality === 'attacking') mentalityFactor = 1.25;
+    else if (this.mentality === 'defensive') mentalityFactor = 0.75;
+
+    const push = CONFIG.AI.LINE_DEPTH_SHIFT * mentalityFactor * (inPossession ? 0.55 + 0.45 * ballAdv : 0.25 + 0.55 * ballAdv);
     x += push * dir;
 
     // lateral shift toward ball side

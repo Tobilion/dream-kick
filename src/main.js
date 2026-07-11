@@ -4,16 +4,19 @@ import { CONFIG } from './core/config.js';
 import { StateMachine } from './core/state.js';
 import { loadSave, writeSave, recordResult } from './core/save.js';
 import { CLUBS } from './data/teams.js';
-import { Match } from './engine/match.js';
+import { Match, MATCH_STATE } from './engine/match.js';
 import { SceneMgr } from './render/scene.js';
 import { Stadium } from './render/stadium.js';
 import { PlayerMesh } from './render/playerMesh.js';
 import { BallMesh } from './render/ballMesh.js';
-import { BroadcastCam } from './render/camera.js';
+import { CameraController, CAMERA_PRESETS, PRESET_LABELS, migratePreset } from './render/cameraController.js';
 import { Effects } from './render/effects.js';
 import { Input } from './input/input.js';
 import { Screens } from './ui/screens.js';
 import { Hud } from './ui/hud.js';
+import { LineupIntro } from './ui/lineupIntro.js';
+import { showTeamManagementModal } from './ui/teamManagement.js';
+import { showSettingsModal } from './ui/settingsScreen.js';
 
 const canvas = document.getElementById('gameCanvas');
 const uiRoot = document.getElementById('ui');
@@ -22,11 +25,23 @@ const hudRoot = document.getElementById('hudRoot');
 const save = loadSave();
 const sceneMgr = new SceneMgr(canvas);
 const stadium = new Stadium(sceneMgr.scene, sceneMgr.shadowsOn);
-const cam = new BroadcastCam(sceneMgr.aspect);
+const cam = new CameraController(sceneMgr.aspect);
 sceneMgr.onResize = a => cam.setAspect(a);
+cam.setOccludables(stadium.standsList);
+
+// Clean hierarchy: all match actors live under one group
+const playersGroup = new THREE.Group();
+playersGroup.name = 'PlayersAndBall';
+sceneMgr.scene.add(playersGroup);
 const effects = new Effects(sceneMgr.scene);
 const input = new Input();
 const fsm = new StateMachine();
+
+// Apply persisted camera settings on startup (migrating legacy v1 preset names)
+cam.preset = migratePreset(save.cameraPreset);
+save.cameraPreset = cam.preset;
+cam.setDistance(save.cameraDistance ?? save.cameraZoom ?? 1.0);
+save.cameraDistance = cam.distance;
 
 /** name-plate projection helper used by hud.js */
 const _pv = new THREE.Vector3();
@@ -37,33 +52,67 @@ window.__projectPoint = (x, y, z, size) => {
 };
 
 let match = null;
-let meshes = [];         // PlayerMesh list
+let meshes = [];
 let ballMesh = null;
 let hud = null;
 let paused = false;
 
+/** Camera preset order for in-game cycling */
+function cycleCamera() {
+  const idx = CAMERA_PRESETS.indexOf(cam.preset);
+  cam.preset = CAMERA_PRESETS[(idx + 1) % CAMERA_PRESETS.length];
+  save.cameraPreset = cam.preset;
+  writeSave(save);
+  hud?.ticker(`Camera: ${PRESET_LABELS[cam.preset].toUpperCase()}`);
+}
+
 const screens = new Screens(uiRoot, save, {
   startMatch: opts => fsm.go('MATCH', opts),
   toMenu: () => fsm.go('MENU'),
+  openSettings: () => showSettingsModal(save, null, cam),
 });
 
 hud = new Hud(hudRoot, {
   togglePause: () => setPaused(!paused),
   pauseAction: act => {
-    if (act === 'resume') setPaused(false);
-    else if (act === 'restart') { const o = match._opts; setPaused(false); fsm.go('MATCH', o); }
-    else if (act === 'quit') { setPaused(false); fsm.go('MENU'); }
+    if (act === 'resume') {
+      setPaused(false);
+    } else if (act === 'teamMgmt') {
+      showTeamManagementModal(match, 0, () => {});
+    } else if (act === 'settings') {
+      showSettingsModal(save, match, cam, () => {});
+    } else if (act === 'simEnd') {
+      const confirmed = confirm('Simulate the rest of the match? The engine will auto-play to full time.');
+      if (confirmed) {
+        setPaused(false);
+        match.simToEnd();
+      }
+    } else if (act === 'forfeit') {
+      const confirmed = confirm('Forfeit the match? You will concede 3 goals and be taken to the results screen.');
+      if (confirmed) {
+        setPaused(false);
+        match.forfeit();
+      }
+    } else if (act === 'quit') {
+      const confirmed = confirm('Exit to the main menu? Your current match progress will be lost.');
+      if (confirmed) {
+        setPaused(false);
+        fsm.go('MENU');
+      }
+    }
   },
 });
 
 function setPaused(on) {
   if (!match) return;
   paused = on;
-  match.paused = on;
+  if (on) match.go(MATCH_STATE.PAUSED);
+  else match.go('UNPAUSE');
   hud.setPaused(on);
+  if (!on) hud.idleTime = 0;
 }
 
-/* ---------------- states ---------------- */
+/* ---------------- FSM states ---------------- */
 fsm.register('MENU', {
   enter() {
     cam.mode = 'orbit';
@@ -78,10 +127,13 @@ fsm.register('MATCH', {
   enter(opts) {
     screens.hide();
     clearMatchVisuals();
-    save.homeTeam = opts.homeClub.id; save.awayTeam = opts.awayClub.id;
-    save.difficulty = opts.difficulty; save.halfLength = opts.halfLength;
+    save.homeTeam = opts.homeClub.id;
+    save.awayTeam = opts.awayClub.id;
+    save.difficulty = opts.difficulty;
+    save.halfLength = opts.halfLength;
     writeSave(save);
 
+    // Build match simulation
     match = new Match({
       ...opts,
       userTeam: 0,
@@ -93,128 +145,71 @@ fsm.register('MATCH', {
           effects.goalBurst(match.teams[team].goalX, 0);
           cam.shake(0.9);
         },
+        onStateChange: state => {
+          const labels = {
+            HALF_TIME: 'HALF TIME',
+            KICKOFF: 'KICK OFF',
+            FULL_TIME: 'FULL TIME',
+          };
+          if (labels[state]) hud.phaseBanner(labels[state]);
+          // Show half-time screen then resume automatically
+          if (state === MATCH_STATE.HALF_TIME) {
+            setTimeout(() => screens.halfTime(match, () => match.resumeFromHalfTime()), 400);
+          }
+          if (state === MATCH_STATE.FULL_TIME) {
+            onFullTime();
+          }
+        },
         onPhase: phase => {
           const labels = {
             THROW_IN: 'THROW IN', CORNER: 'CORNER', GOAL_KICK: 'GOAL KICK',
-            FREE_KICK: 'FREE KICK', HALF_TIME: 'HALF TIME', KICKOFF: 'KICK OFF',
+            FREE_KICK: 'FREE KICK',
           };
           if (labels[phase]) hud.phaseBanner(labels[phase]);
         },
         onKick: (kind, power) => { if (kind === 'shot' && power > 0.7) cam.shake(0.35); },
         onCommentary: text => hud.ticker(text),
-        onFullTime: () => {
-          recordResult(save, {
-            home: match.teams[0].club.code, away: match.teams[1].club.code,
-            hs: match.score[0], as: match.score[1],
-          });
-          
-          if (match._opts.isCareer) {
-            const myClubId = save.career.clubId;
-            const oppClubId = match._opts.awayClub.id;
-            const myScore = match.score[0];
-            const oppScore = match.score[1];
-            
-            const myStats = save.career.stats.find(st => st.id === myClubId);
-            if (myStats) {
-              myStats.pld++;
-              myStats.gf += myScore;
-              myStats.ga += oppScore;
-              if (myScore > oppScore) { myStats.w++; myStats.pts += 3; }
-              else if (myScore === oppScore) { myStats.d++; myStats.pts += 1; }
-              else { myStats.l++; }
-            }
-            
-            const oppStats = save.career.stats.find(st => st.id === oppClubId);
-            if (oppStats) {
-              oppStats.pld++;
-              oppStats.gf += oppScore;
-              oppStats.ga += myScore;
-              if (oppScore > myScore) { oppStats.w++; oppStats.pts += 3; }
-              else if (oppScore === myScore) { oppStats.d++; oppStats.pts += 1; }
-              else { oppStats.l++; }
-            }
-            
-            const week = save.career.week;
-            const stats = save.career.stats;
-            const playedThisWeek = new Set([myClubId, oppClubId]);
-            
-            for (let i = 0; i < stats.length; i++) {
-              const st = stats[i];
-              if (playedThisWeek.has(st.id)) continue;
-              
-              const oppIdx = (st.id + week) % stats.length;
-              const oppSt = stats[oppIdx];
-              
-              if (oppSt && !playedThisWeek.has(oppSt.id)) {
-                playedThisWeek.add(st.id);
-                playedThisWeek.add(oppSt.id);
-                
-                const r1 = CLUBS[st.id].rating;
-                const r2 = CLUBS[oppSt.id].rating;
-                
-                let s1 = Math.floor(Math.random() * 2);
-                let s2 = Math.floor(Math.random() * 2);
-                
-                if (r1 > r2 + 4) s1 += Math.floor(Math.random() * 2);
-                else if (r2 > r1 + 4) s2 += Math.floor(Math.random() * 2);
-                
-                st.pld++;
-                st.gf += s1;
-                st.ga += s2;
-                
-                oppSt.pld++;
-                oppSt.gf += s2;
-                oppSt.ga += s1;
-                
-                if (s1 > s2) {
-                  st.w++; st.pts += 3;
-                  oppSt.l++;
-                } else if (s1 === s2) {
-                  st.d++; st.pts += 1;
-                  oppSt.d++; oppSt.pts += 1;
-                } else {
-                  st.l++;
-                  oppSt.w++; oppSt.pts += 3;
-                }
-              }
-            }
-            
-            save.career.week++;
-            writeSave(save);
-          }
-          
-          setTimeout(() => fsm.go('RESULTS'), 900);
-        },
+        onFullTime: () => {},  // handled via onStateChange above
       },
     });
     match._opts = opts;
 
-    // build visuals
+    // Build 3D player meshes and wire back-reference for subs
     for (const team of match.teams) {
       const kitKey = team.index === 0 ? 'home' : 'away';
       for (const p of team.players) {
         const m = new PlayerMesh(p, team.club.kits[kitKey], sceneMgr.shadowsOn);
-        sceneMgr.scene.add(m.group);
+        playersGroup.add(m.group);
         meshes.push(m);
       }
     }
-    ballMesh = new BallMesh(match.ball, sceneMgr.shadowsOn);
-    ballMesh.addTo(sceneMgr.scene);
+    match._meshes = meshes;
 
-    // controlled-player ring
+    ballMesh = new BallMesh(match.ball, sceneMgr.shadowsOn);
+    ballMesh.addTo(playersGroup);
     ringMesh = makeRing();
-    sceneMgr.scene.add(ringMesh);
+    playersGroup.add(ringMesh);
 
     cam.mode = 'follow';
-    hud.bind(match);
     input.showTouchUI(true);
     paused = false;
+
+    // Run skippable lineup intro before kickoff
+    const intro = new LineupIntro(uiRoot, match, () => {
+      // Intro done → start kickoff
+      match.go(MATCH_STATE.KICKOFF);
+      hud.bind(match);
+      hud.show(true);
+    });
   },
+
   update(dt) {
     input.update();
     if (input.state.pausePressed) setPaused(!paused);
+    if (input.state.cycleCamPressed) cycleCamera();
     match.update(dt, input.state);
   },
+
   exit() {
     input.showTouchUI(false);
     hud.show(false);
@@ -229,6 +224,66 @@ fsm.register('RESULTS', {
   },
 });
 
+/** Called when the match FSM emits FULL_TIME */
+function onFullTime() {
+  recordResult(save, {
+    home: match.teams[0].club.code,
+    away: match.teams[1].club.code,
+    hs: match.score[0],
+    as: match.score[1],
+  });
+
+  // Career mode: update standings
+  if (match._opts.isCareer) {
+    updateCareerStandings();
+  }
+
+  setTimeout(() => fsm.go('RESULTS'), 900);
+}
+
+function updateCareerStandings() {
+  const myClubId = save.career.clubId;
+  const oppClubId = match._opts.awayClub.id;
+  const myScore = match.score[0];
+  const oppScore = match.score[1];
+
+  const updateRow = (stats, gf, ga) => {
+    if (!stats) return;
+    stats.pld++;
+    stats.gf += gf; stats.ga += ga;
+    if (gf > ga) { stats.w++; stats.pts += 3; }
+    else if (gf === ga) { stats.d++; stats.pts += 1; }
+    else { stats.l++; }
+  };
+
+  updateRow(save.career.stats.find(s => s.id === myClubId), myScore, oppScore);
+  updateRow(save.career.stats.find(s => s.id === oppClubId), oppScore, myScore);
+
+  // Simulate other club fixtures this week
+  const week = save.career.week;
+  const stats = save.career.stats;
+  const played = new Set([myClubId, oppClubId]);
+  for (let i = 0; i < stats.length; i++) {
+    const st = stats[i];
+    if (played.has(st.id)) continue;
+    const oppIdx = (st.id + week) % stats.length;
+    const oppSt = stats[oppIdx];
+    if (oppSt && !played.has(oppSt.id)) {
+      played.add(st.id); played.add(oppSt.id);
+      const r1 = CLUBS[st.id]?.rating || 75;
+      const r2 = CLUBS[oppSt.id]?.rating || 75;
+      let s1 = Math.floor(Math.random() * 2), s2 = Math.floor(Math.random() * 2);
+      if (r1 > r2 + 4) s1 += Math.floor(Math.random() * 2);
+      else if (r2 > r1 + 4) s2 += Math.floor(Math.random() * 2);
+      updateRow(st, s1, s2);
+      updateRow(oppSt, s2, s1);
+    }
+  }
+
+  save.career.week++;
+  writeSave(save);
+}
+
 let ringMesh = null;
 function makeRing() {
   const geo = new THREE.RingGeometry(0.55, 0.72, 24);
@@ -240,11 +295,14 @@ function makeRing() {
 }
 
 function clearMatchVisuals() {
-  for (const m of meshes) sceneMgr.scene.remove(m.group);
+  playersGroup.clear();
   meshes = [];
-  if (ballMesh) { sceneMgr.scene.remove(ballMesh.group, ballMesh.blob); ballMesh = null; }
-  if (ringMesh) { sceneMgr.scene.remove(ringMesh); ringMesh = null; }
+  ballMesh = null;
+  ringMesh = null;
+  if (match) match._meshes = [];
 }
+
+/* ---- half-time screen hook (Screens must expose halfTime method) ---- */
 
 /* ---------------- main loop (fixed timestep) ---------------- */
 const FIXED = 1 / 60;
@@ -254,29 +312,32 @@ function frame(now) {
   requestAnimationFrame(frame);
   let dt = (now - last) / 1000;
   last = now;
-  dt = Math.min(dt, 0.1); // avoid spiral of death after tab switch
+  dt = Math.min(dt, 0.1);
 
-  // simulation at fixed rate
   acc += dt;
   while (acc >= FIXED) {
     fsm.update(FIXED);
     acc -= FIXED;
   }
 
-  // render-side updates at display rate
-  stadium.update(dt);
+  // Render-rate updates
+  const camPos = cam.cam.position;
+  stadium.update(dt, camPos);
   effects.update(dt);
   sceneMgr.probeQuality(dt);
 
   if (fsm.is('MATCH') && match) {
     for (const m of meshes) m.update(dt);
-    ballMesh.update(dt);
+    if (ballMesh) ballMesh.update(dt);
     if (ringMesh && match.controlled) {
       ringMesh.position.x = match.controlled.pos.x;
       ringMesh.position.z = match.controlled.pos.z;
       ringMesh.visible = true;
+    } else if (ringMesh) {
+      ringMesh.visible = false;
     }
-    cam.update(dt, match.ball.pos, match.ball.vel);
+    const attackDir = match.teams[0].attackDir;
+    cam.update(dt, match.ball.pos, match.ball.vel, attackDir);
     hud.update(match, cam.cam, { w: window.innerWidth, h: window.innerHeight }, dt);
   } else {
     cam.update(dt, { x: 0, y: 0, z: 0 }, null);

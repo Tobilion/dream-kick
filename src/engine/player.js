@@ -42,12 +42,16 @@ export class PlayerEntity {
     this.home = { x: 0, z: 0 };      // formation anchor (updated by team)
     this.aiTimer = Math.random() * 0.2; // stagger decisions
     this.controlCooldown = 0;        // can't re-take touch immediately after kicking
+    this.hasBall = false;            // tracks possession for dribbling speed reduction
+    this.firstTouchT = 0;            // control delay when receiving a pass (PossessionSystem)
+    this.tackleCooldownT = 0;        // re-tackle lockout after a failed tackle
   }
 
   get maxSpeed() {
     let s = P.BASE_SPEED + P.PACE_SPEED_SPAN * ((this.data.pace - 50) / 50);
     if (this.sprinting && this.stamina > 0) s *= P.SPRINT_MULT;
     if (this.stamina < 20) s *= P.TIRED_SPEED_PENALTY;
+    if (this.hasBall) s *= P.DRIBBLE_SPEED_MULT; // dribbling ~87% of off-ball speed
     return s;
   }
 

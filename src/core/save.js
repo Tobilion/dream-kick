@@ -7,6 +7,8 @@ const DEFAULTS = {
   homeTeam: 0,
   awayTeam: 1,
   sound: true,
+  cameraPreset: 'sideline',   // 'sideline' | 'broadcast' | 'topDown' | 'endToEnd'
+  cameraDistance: 1.0,        // 0.8 .. 1.3
   results: [], // last 10 results: {home, away, hs, as}
 };
 

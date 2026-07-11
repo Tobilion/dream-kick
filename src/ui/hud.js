@@ -37,9 +37,12 @@ export class Hud {
       <div id="pauseOverlay">
         <div class="pause-panel">
           <div class="pause-title">PAUSED</div>
-          <button data-act="resume">RESUME</button>
-          <button data-act="restart">RESTART MATCH</button>
-          <button data-act="quit">QUIT TO MENU</button>
+          <button data-act="resume">▶  RESUME</button>
+          <button data-act="teamMgmt">👥  TEAM MANAGEMENT</button>
+          <button data-act="settings">⚙️  SETTINGS</button>
+          <button data-act="simEnd">⏩  SIM TO END</button>
+          <button data-act="forfeit">🏳️  FORFEIT MATCH</button>
+          <button data-act="quit">✕  EXIT TO MENU</button>
         </div>
       </div>`;
     root.appendChild(this.el);

@@ -16,15 +16,19 @@ export class SceneMgr {
     this.scene.background = makeSkyTexture();
     this.scene.fog = new THREE.Fog(0x0d1226, 160, 340);
 
-    // lighting
+    // lighting (grouped for clean hierarchy: scene → Lighting)
+    this.lighting = new THREE.Group();
+    this.lighting.name = 'Lighting';
     this.hemi = new THREE.HemisphereLight(0xcfe8ff, 0x1c3a24, 1.05);
-    this.scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xfff4e0, 1.5);
     this.sun.position.set(-40, 80, 30);
-    this.scene.add(this.sun);
+    this.lighting.add(this.hemi, this.sun, this.sun.target);
+    this.scene.add(this.lighting);
 
     this.isTouch = matchMedia('(pointer:coarse)').matches;
-    this.shadowsOn = R.SHADOWS_DESKTOP && !this.isTouch;
+    // V2: shadows on everywhere by default — they sell the 3D read of players
+    // (DLS reference). probeQuality() still disables them if fps is poor.
+    this.shadowsOn = R.SHADOWS_DESKTOP;
     if (this.shadowsOn) {
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFShadowMap;
