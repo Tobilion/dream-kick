@@ -55,7 +55,7 @@ export class Team {
     this.club = club;
     this.index = index;
     this.formation = formation;
-    this.attackDir = index === 0 ? 1 : -1; // flipped at halftime
+    this.attackDir = index === 0 ? 1 : -1; // OWNED by match.syncAttackDirs() — never mutate elsewhere
     this.lineup = pickLineup(club, formation);
     this.players = this.lineup.map((p, i) => new PlayerEntity(p, index, i));
     this.gk = this.players[0];
@@ -81,11 +81,15 @@ export class Team {
     const push = CONFIG.AI.LINE_DEPTH_SHIFT * mentalityFactor * (inPossession ? 0.55 + 0.45 * ballAdv : 0.25 + 0.55 * ballAdv);
     x += push * dir;
 
+    // slot 0 is always the GK slot (players[i] would be wrong — i is a SLOT
+    // index and idx assignments change with formation edits)
+    const slotIsGK = i === 0;
+
     // lateral shift toward ball side
-    z += (ballZ - z) * CONFIG.AI.SUPPORT_SHIFT * (this.players[i].isGK ? 0.15 : 1);
+    z += (ballZ - z) * CONFIG.AI.SUPPORT_SHIFT * (slotIsGK ? 0.15 : 1);
 
     // GK stays near goal
-    if (this.players[i].isGK) {
+    if (slotIsGK) {
       x = (-HALF_L + 2.5) * dir;
       z = clamp(ballZ * 0.12, -5, 5);
     }
@@ -98,23 +102,27 @@ export class Team {
 
   /** Place all players in formation (kickoff), optionally on own half only. */
   resetPositions(kicking) {
-    for (let i = 0; i < this.players.length; i++) {
-      const t = FORMATIONS[this.formation][i];
+    const slots = FORMATIONS[this.formation];
+    for (const p of this.players) {
+      // use p.idx (slot assignment), NOT array order — formation changes and
+      // slot swaps in team management reassign idx without reordering the array
+      const t = slots[p.idx] || slots[0];
       const dir = this.attackDir;
       let x = (-HALF_L + t.x * PITCH.LENGTH * 0.86) * dir;
       let z = t.z * HALF_W * 0.85;
       // keep on own half
       if (x * dir > -1.5) x = -1.5 * dir - Math.random() * 2 * dir;
-      const p = this.players[i];
       p.pos.x = x; p.pos.z = z;
       p.vel.x = p.vel.z = 0;
       p.facing = dir > 0 ? 0 : Math.PI;
       p.state = 'normal';
+      p.hasBall = false;
+      p.setMove(0, 0, 0, false);
     }
     if (kicking) {
-      // two forwards to the center spot
-      const fws = this.players.slice(-2);
-      fws[0].pos.x = -0.8 * this.attackDir; fws[0].pos.z = 0.2;
+      // two most-advanced slots to the center spot
+      const fws = [...this.players].filter(p => !p.isGK).sort((a, b) => b.idx - a.idx).slice(0, 2);
+      if (fws[0]) { fws[0].pos.x = -0.8 * this.attackDir; fws[0].pos.z = 0.2; }
       if (fws[1]) { fws[1].pos.x = -2.6 * this.attackDir; fws[1].pos.z = -2.2; }
     }
   }

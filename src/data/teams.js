@@ -38,22 +38,44 @@ function statFor(rng, base, primary) {
   return clamp(Math.round(base - (primary ? 0 : 6) + (rng() * 2 - 1) * spread), 42, 96);
 }
 
+let _playerSeq = 1;
+
+/**
+ * Player schema (V3 Phase C — modeled on Sportsim-pro types/player.ts, kept
+ * as a plain object). Attribute six-pack: pace, shoot(ing), pass(ing),
+ * dribble/dribbling, defend(ing), physical. `season` accumulates across
+ * matches; `form` = last-5 match-ratings average (0 until played).
+ */
 function makePlayer(rng, region, used, pos, num, rating) {
   const p = {
+    id: `pl_${_playerSeq++}`,
     name: buildName(rng, region, used),
     pos, num,
+    age: irand(rng, 18, 34),
     pace: statFor(rng, rating, pos === 'FW'),
     shoot: statFor(rng, rating, pos === 'FW'),
     pass: statFor(rng, rating, pos === 'MF'),
+    dribble: statFor(rng, rating, pos === 'FW' || pos === 'MF'),
     defend: statFor(rng, rating, pos === 'DF'),
     physical: statFor(rng, rating, pos === 'DF'),
     gk: pos === 'GK' ? statFor(rng, rating, true) : irand(rng, 20, 35),
     skin: irand(rng, 0, 4),
     hair: irand(rng, 0, 5),
+    morale: irand(rng, 55, 90),
+    season: { apps: 0, goals: 0, assists: 0, tackles: 0, saves: 0, matchRatings: [] },
   };
   if (pos === 'GK') { p.pace = clamp(p.pace - 12, 40, 80); }
   p.overall = overallOf(p);
+  // market value: overall + youth premium (peaks ~23, tails off past 30)
+  const ageFactor = p.age <= 23 ? 1.35 - (23 - p.age) * 0.03 : clamp(1.35 - (p.age - 23) * 0.09, 0.25, 1.35);
+  p.marketValue = Math.round(Math.pow(1.11, p.overall - 60) * 2.2 * ageFactor * 10) / 10; // €m
   return p;
+}
+
+/** Form = average of last 5 match ratings (0 if none yet). */
+export function playerForm(p) {
+  const r = p.season?.matchRatings?.slice(-5) || [];
+  return r.length ? Math.round((r.reduce((a, b) => a + b, 0) / r.length) * 10) / 10 : 0;
 }
 
 export function overallOf(p) {

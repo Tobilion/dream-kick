@@ -99,14 +99,14 @@ export function showTeamManagementModal(match, userTeamIdx, onComplete = null) {
       const slot = slots[p.idx] || slots[0];
       const card = renderPlayerCard(p, kitColors, {
         className: `compact ${selectedStarter === p ? 'active' : ''}`,
-        onClick: () => handleStarterClick(p)
+        onClick: () => handleStarterClick(p),
+        onDblClick: () => showPlayerInfoPopup(p, kitColors),
       });
       // slot.x: 0=own goal → bottom of the panel; slot.z: -1..1 → left/right
       card.style.position = 'absolute';
       card.style.left = `${50 + slot.z * 40}%`;
       card.style.top = `${88 - slot.x * 82}%`;
       card.style.transform = 'translate(-50%, -50%)';
-      card.ondblclick = () => showPlayerInfoPopup(p.data, kitColors);
       pitchEl.appendChild(card);
     });
 
@@ -118,9 +118,9 @@ export function showTeamManagementModal(match, userTeamIdx, onComplete = null) {
       bench.forEach(bp => {
         const card = renderPlayerCard(bp, kitColors, {
           className: `rowcard ${selectedBench === bp ? 'active' : ''}`,
-          onClick: () => handleBenchClick(bp)
+          onClick: () => handleBenchClick(bp),
+          onDblClick: () => showPlayerInfoPopup(bp, kitColors),
         });
-        card.ondblclick = () => showPlayerInfoPopup(bp, kitColors);
         benchContainer.appendChild(card);
       });
     }

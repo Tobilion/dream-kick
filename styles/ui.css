@@ -760,3 +760,90 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .player-card.rowcard .card-avatar { width: 34px; height: 34px; flex: 0 0 auto; }
 .player-card.rowcard .card-info { flex: 1; min-width: 0; flex-direction: row; justify-content: space-between; align-items: center; gap: 8px; }
 .player-card.rowcard .card-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- V2 Phase 4: half-time menu, stats modal, rating chips ---------- */
+.htmenu { position: fixed; inset: 0; z-index: 1200; display: flex; align-items: center; justify-content: center;
+  background: rgba(10,12,16,0.88); backdrop-filter: blur(14px); opacity: 0; transition: opacity 0.35s var(--ease); }
+.htmenu.in { opacity: 1; }
+.htmenu-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 20px;
+  padding: 26px 34px; width: min(94vw, 560px); box-shadow: 0 8px 60px rgba(0,0,0,0.7); text-align: center; }
+.htmenu-tag { font-size: 11px; letter-spacing: 3px; color: var(--accent); font-weight: 800; margin-bottom: 14px; }
+.htmenu-score { display: flex; align-items: center; justify-content: center; gap: 22px; margin-bottom: 18px; }
+.htmenu-team { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); font-weight: 700; }
+.htmenu-num { font-size: 44px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.htmenu-num i { font-style: normal; color: var(--muted); padding: 0 6px; }
+.htmenu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.htmenu-grid button { background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 10px; padding: 13px 10px; font: inherit; font-size: 12px; font-weight: 800;
+  letter-spacing: 0.6px; cursor: pointer; transition: all 0.15s; text-align: left; }
+.htmenu-grid button:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-1px); }
+.htmenu-grid button.danger:hover { border-color: #e05263; color: #e05263; }
+.htmenu-continue { width: 100%; }
+
+.mstat-teams { display: flex; justify-content: space-between; font-size: 11px; font-weight: 800;
+  color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.mstat-row { display: flex; flex-direction: column; gap: 4px; }
+.mstat-nums { display: flex; justify-content: space-between; font-size: 12px; }
+.mstat-nums span { color: var(--muted); font-size: 10px; letter-spacing: 1.4px; font-weight: 700; }
+.mstat-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,0.06); }
+.mstat-bar i:first-child { background: var(--accent); transition: width 0.6s var(--ease); }
+.mstat-bar i:last-child { background: #3b6fd4; transition: width 0.6s var(--ease); }
+
+.ratings-panel { padding: 14px 18px; }
+.ratings-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 22px; text-align: left; }
+.rr-club { font-size: 10px; font-weight: 900; color: var(--muted); letter-spacing: 2px; margin-bottom: 6px; }
+.rating-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; }
+.rr-name { flex: 1; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rr-pos { color: var(--muted); font-size: 9px; font-weight: 800; }
+.rating-chip { min-width: 34px; text-align: center; padding: 3px 6px; border-radius: 6px;
+  font-weight: 900; font-size: 11px; border: 1px solid; }
+.rating-chip.r8 { color: #34d399; background: rgba(16,185,129,0.15); border-color: rgba(16,185,129,0.3); }
+.rating-chip.r7 { color: #38bdf8; background: rgba(14,165,233,0.15); border-color: rgba(14,165,233,0.3); }
+.rating-chip.r6 { color: #fbbf24; background: rgba(245,158,11,0.15); border-color: rgba(245,158,11,0.3); }
+.rating-chip.r5 { color: #fb923c; background: rgba(249,115,22,0.15); border-color: rgba(249,115,22,0.3); }
+.rating-chip.r4 { color: #fb7185; background: rgba(244,63,94,0.15); border-color: rgba(244,63,94,0.3); }
+
+/* ---------- V3 Phase C: player dossier ---------- */
+.dossier { padding: 18px 20px; }
+.dossier-head { display: flex; gap: 14px; align-items: center; margin-bottom: 6px; }
+.dossier-head canvas { border-radius: 10px; border: 1.5px solid var(--border); flex: 0 0 auto; }
+.dh-main { flex: 1; min-width: 0; }
+.dh-main h3 { font-size: 18px; font-weight: 900; margin-bottom: 4px; }
+.dh-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.dh-pos { font-size: 9px; font-weight: 900; padding: 2px 7px; border-radius: 5px; letter-spacing: 1px; }
+.pos-GK { color: #fb923c; background: rgba(249,115,22,0.16); }
+.pos-DF { color: #38bdf8; background: rgba(14,165,233,0.16); }
+.pos-MF { color: #34d399; background: rgba(16,185,129,0.16); }
+.pos-FW { color: #fb7185; background: rgba(244,63,94,0.16); }
+.dh-meta { font-size: 10.5px; color: var(--muted); }
+.dh-meta b { color: var(--text); }
+.dh-ovr { text-align: center; flex: 0 0 auto; }
+.dh-ovr-num { font-size: 26px; font-weight: 900; line-height: 1; }
+.dh-ovr-lbl { font-size: 9px; color: var(--muted); letter-spacing: 2px; margin-top: 2px; }
+.dh-form { margin-top: 5px; font-size: 9px; font-weight: 900; padding: 2px 6px; border-radius: 5px; letter-spacing: 0.6px; }
+.dh-form.hi { color: #34d399; background: rgba(16,185,129,0.15); }
+.dh-form.mid { color: #fbbf24; background: rgba(245,158,11,0.15); }
+.dh-form.lo { color: #fb7185; background: rgba(244,63,94,0.15); }
+.dossier-section { font-size: 9px; font-weight: 900; letter-spacing: 2.4px; color: var(--accent); margin: 14px 0 8px; }
+.dossier-attr { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+.da-label { flex: 0 0 76px; font-size: 11px; color: var(--muted); font-weight: 700; }
+.da-bar { flex: 1; height: 7px; border-radius: 4px; background: rgba(255,255,255,0.07); overflow: hidden; }
+.da-bar i { display: block; height: 100%; border-radius: 4px; transition: width 0.5s var(--ease); }
+.da-bar i.hi { background: #34d399; }
+.da-bar i.mid { background: #38bdf8; }
+.da-bar i.lo { background: #fbbf24; }
+.da-val { flex: 0 0 26px; text-align: right; font-size: 11.5px; font-weight: 900; }
+.dossier-stats { display: flex; gap: 8px; }
+.dossier-stats > div { flex: 1; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px; text-align: center; }
+.dossier-stats b { display: block; font-size: 15px; font-weight: 900; }
+.dossier-stats span { font-size: 8.5px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+
+/* ---------- V3 Phase D: career dashboard ---------- */
+.career-dash-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 12.5px; border-bottom: 1px solid var(--border); }
+.career-dash-row:last-child { border-bottom: none; }
+.career-dash-row span:first-child { color: var(--muted); }
+.form-chips { display: flex; gap: 4px; }
+.form-chips i { font-style: normal; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 10px; font-weight: 900; }
+.form-chips .fc-W { background: rgba(16,185,129,0.2); color: #34d399; }
+.form-chips .fc-D { background: rgba(245,158,11,0.2); color: #fbbf24; }
+.form-chips .fc-L { background: rgba(244,63,94,0.2); color: #fb7185; }

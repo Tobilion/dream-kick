@@ -1,6 +1,8 @@
-/** playerCard.js — renders player cards and player info popups, reusing shapes from Sport Sim / Bet Simulator. */
+/** playerCard.js — player cards + Player Dossier modal (vanilla port of
+ *  Sportsim-pro PlayerDossierModal.tsx / PlayerCompareModal.tsx patterns). */
 import { drawPortrait } from './draw.js';
 import { initSpotlight } from './components.js';
+import { playerForm } from '../data/teams.js';
 
 /** Render a polished card representation of a player.
  *  Accepts either an engine Player (with .data) or a plain squad data object. */
@@ -27,41 +29,105 @@ export function renderPlayerCard(player, kitColors, options = {}) {
   setTimeout(() => drawPortrait(canvas, d, kitColors), 10);
   
   initSpotlight(card);
-  
-  if (options.onClick) {
+
+  // Unified tap handling. Single-click actions (select/sub) often REBUILD the
+  // parent view, destroying this element — which killed native ondblclick
+  // (the 2nd click landed on a brand-new node). So we detect double-tap
+  // ourselves: delay onClick briefly; a 2nd tap within the window cancels it
+  // and fires onDblClick instead. Also works on touch, where dblclick doesn't.
+  if (options.onClick || options.onDblClick) {
     card.style.cursor = 'pointer';
-    card.onclick = (e) => options.onClick(player, e);
+    let pending = null;
+    card.onclick = (e) => {
+      if (!options.onDblClick) { options.onClick?.(player, e); return; }
+      if (pending) {
+        clearTimeout(pending);
+        pending = null;
+        options.onDblClick(player, e);
+      } else {
+        pending = setTimeout(() => {
+          pending = null;
+          options.onClick?.(player, e);
+        }, 260);
+      }
+    };
   }
 
   return card;
 }
 
-/** Show player info modal. */
-export function showPlayerInfoPopup(player, kitColors) {
+/** Age phase label (Sportsim-pro dossier pattern). */
+function agePhase(age) {
+  if (age < 20) return '🌱 Prospect';
+  if (age < 24) return '⚡ Rising Star';
+  if (age < 28) return '🔥 Prime';
+  if (age < 32) return '🧭 Veteran';
+  return '📉 Twilight';
+}
+
+function attrBar(label, v) {
+  const cls = v >= 85 ? 'hi' : v >= 70 ? 'mid' : 'lo';
+  return `
+    <div class="dossier-attr">
+      <span class="da-label">${label}</span>
+      <div class="da-bar"><i class="${cls}" style="width:${v}%"></i></div>
+      <span class="da-val">${v}</span>
+    </div>`;
+}
+
+/**
+ * Player Dossier modal (V3 Phase C). Accepts engine Player or plain data.
+ * Full attributes, season stats, form, market value.
+ */
+export function showPlayerInfoPopup(playerOrEntity, kitColors) {
+  const player = playerOrEntity?.data ?? playerOrEntity;
+  const sn = player.season || { apps: 0, goals: 0, assists: 0, tackles: 0, saves: 0, matchRatings: [] };
+  const form = playerForm(player);
+  const formCls = form >= 7.5 ? 'hi' : form >= 6.5 ? 'mid' : form > 0 ? 'lo' : '';
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop in';
-  
+  // must stack ABOVE team-management/settings modals (they use 9001+)
+  modal.style.zIndex = '9500';
+
   modal.innerHTML = `
-    <div class="modal-panel" style="max-width: 360px;">
-      <div class="modal-header">
-        <h2>PLAYER CARD</h2>
-        <button class="modal-close">&times;</button>
-      </div>
-      <div class="modal-content" style="display: flex; flex-direction: column; align-items: center; gap: 16px;">
-        <canvas id="popupAvatar" width="100" height="100" style="border-radius: 8px; border: 1.5px solid var(--border);"></canvas>
-        <div style="text-align: center;">
-          <h3 style="font-size: 20px; font-weight: 900;">${player.name}</h3>
-          <p style="color: var(--accent); font-weight: 700; font-size: 13px;">${player.pos} · Number ${player.num} · OVR ${player.overall}</p>
+    <div class="modal-panel dossier" style="max-width: 420px;">
+      <div class="dossier-head">
+        <canvas id="popupAvatar" width="72" height="72"></canvas>
+        <div class="dh-main">
+          <h3>${player.name}</h3>
+          <div class="dh-tags">
+            <span class="dh-pos pos-${player.pos}">${player.pos}</span>
+            <span class="dh-meta">#${player.num} · Age ${player.age ?? '—'} · ${agePhase(player.age ?? 26)}</span>
+          </div>
+          <div class="dh-tags">
+            <span class="dh-meta">Market value <b>€${player.marketValue ?? '—'}m</b> · Morale <b>${player.morale ?? '—'}</b></span>
+          </div>
         </div>
-        <div style="width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px;">
-          <div style="background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">Pace: <b>${player.pace}</b></div>
-          <div style="background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">Shooting: <b>${player.shoot}</b></div>
-          <div style="background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">Passing: <b>${player.pass}</b></div>
-          <div style="background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">Defending: <b>${player.defend}</b></div>
-          <div style="background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">Physical: <b>${player.physical}</b></div>
-          <div style="background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">Goalkeeping: <b>${player.gk}</b></div>
+        <div class="dh-ovr">
+          <div class="dh-ovr-num">${player.overall}</div>
+          <div class="dh-ovr-lbl">OVR</div>
+          ${form ? `<div class="dh-form ${formCls}">FORM ${form.toFixed(1)}</div>` : ''}
         </div>
       </div>
+
+      <div class="dossier-section">ATTRIBUTES</div>
+      ${attrBar('Pace', player.pace)}
+      ${attrBar('Shooting', player.shoot)}
+      ${attrBar('Passing', player.pass)}
+      ${attrBar('Dribbling', player.dribble ?? '—')}
+      ${attrBar('Defending', player.defend)}
+      ${attrBar('Physical', player.physical)}
+      ${player.pos === 'GK' ? attrBar('Goalkeeping', player.gk) : ''}
+
+      <div class="dossier-section">SEASON</div>
+      <div class="dossier-stats">
+        <div><b>${sn.apps}</b><span>Apps</span></div>
+        <div><b>${sn.goals}</b><span>Goals</span></div>
+        <div><b>${sn.assists}</b><span>Assists</span></div>
+        <div><b>${player.pos === 'GK' ? sn.saves : sn.tackles}</b><span>${player.pos === 'GK' ? 'Saves' : 'Tackles'}</span></div>
+        <div><b>${form ? form.toFixed(1) : '—'}</b><span>Avg rating</span></div>
+      </div>
+
       <div class="modal-actions">
         <button class="btn primary modal-ok">CLOSE</button>
       </div>
@@ -69,12 +135,11 @@ export function showPlayerInfoPopup(player, kitColors) {
   `;
 
   document.body.appendChild(modal);
-  
+
   const canvas = modal.querySelector('#popupAvatar');
   drawPortrait(canvas, player, kitColors);
 
   const close = () => modal.remove();
-  modal.querySelector('.modal-close').onclick = close;
   modal.querySelector('.modal-ok').onclick = close;
   modal.onclick = (e) => { if (e.target === modal) close(); };
 }

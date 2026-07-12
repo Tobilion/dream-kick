@@ -11,8 +11,14 @@ import {
   createGlowOrbs, 
   createProgressRing, 
   animateCounter,
-  Toast 
+  Toast
 } from './components.js';
+import { computeMatchRatings, ratingsPanelHTML } from './matchFlow.js';
+import { renderPlayerCard, showPlayerInfoPopup } from './playerCard.js';
+import {
+  CAREER_VERSION, newCareer, seasonOver, userFixture, leagueTable, leaguePosition,
+  teamFormLetters, topScorer, totalRounds, completeRound, syncSeasonStats, endSeason,
+} from '../core/career.js';
 
 let audioCtx = null;
 
@@ -63,14 +69,8 @@ export class Screens {
     this.sel = { home: save.homeTeam ?? 0, away: save.awayTeam ?? 1, difficulty: save.difficulty, half: save.halfLength };
     window.__soundDisabled = !save.sound;
     
-    // Initialize career state if needed
-    if (!this.save.career) {
-      this.save.career = {
-        clubId: null,
-        week: 1,
-        stats: CLUBS.map(c => ({ id: c.id, pld: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }))
-      };
-    }
+    // career init/migration is handled by migrateCareer() in main.js at boot
+    if (!this.save.career) this.save.career = { version: CAREER_VERSION, clubId: null };
   }
 
   clear() { this.root.innerHTML = ''; this.root.className = ''; }
@@ -91,11 +91,12 @@ export class Screens {
     wipe.className = 'screen-wipe';
     document.body.appendChild(wipe);
     
-    requestAnimationFrame(() => {
+    // setTimeout (not rAF) so transitions still complete in a backgrounded tab
+    setTimeout(() => {
       wipe.classList.add('active');
       setTimeout(() => { if (callback) callback(); }, 150);
       setTimeout(() => { wipe.remove(); }, 350);
-    });
+    }, 16);
   }
 
   setupInteractions(el) {
@@ -408,11 +409,13 @@ export class Screens {
     const s = match.stats;
     const passAcc = i => s.passes[i] ? Math.round(100 * s.passOk[i] / s.passes[i]) : 0;
 
-    // man of the match
+    // per-player match ratings (Sport Sim-style); MOTM = top-rated of winning team
+    const ratings = computeMatchRatings(match);
     const winIdx = match.score[0] >= match.score[1] ? 0 : 1;
-    const motmName = match.scorers[winIdx][0]?.name;
-    const motm = match.teams[winIdx].lineup.find(p => p.name === motmName) ||
-      [...match.teams[winIdx].lineup].sort((x, y) => y.overall - x.overall)[0];
+    const motmEntity = [...match.teams[winIdx].players]
+      .sort((x, y) => (ratings.get(y) || 0) - (ratings.get(x) || 0))[0];
+    const motm = motmEntity.data;
+    const motmRating = ratings.get(motmEntity) || 6;
 
     const scorerList = i => match.scorers[i].map(sc => `<div class="scorer">${sc.name} ${sc.minute}'</div>`).join('') || '<div class="scorer dim">—</div>';
 
@@ -437,13 +440,14 @@ export class Screens {
         <div style="flex: 1;">
           <div class="motm-tag">MAN OF THE MATCH</div>
           <div class="motm-name">${motm.name}</div>
-          <div class="dim" style="margin-top: 2px;">${match.teams[winIdx].club.name} · ${motm.pos} · OVR ${motm.overall}</div>
+          <div class="dim" style="margin-top: 2px;">${match.teams[winIdx].club.name} · ${motm.pos} · Match rating ${motmRating.toFixed(1)}</div>
         </div>
         <div class="motm-ring-wrap">
           <svg id="motmRing"></svg>
           <div class="motm-val" data-counter="${motm.overall}">0</div>
         </div>
       </div>
+      <div class="stagger-4">${ratingsPanelHTML(match, ratings)}</div>
       <div class="select-actions stagger-5">
         <button class="btn back magnetic-btn" id="homeBtn">${icon('home', 16)} MAIN MENU</button>
         <button class="btn primary big magnetic-btn" id="rematchBtn">${icon('restart', 16)} REMATCH</button>
@@ -482,85 +486,7 @@ export class Screens {
     this.setupInteractions(el);
   }
 
-  /* ---------------- half-time overlay ---------------- */
-  halfTime(match, onContinue) {
-    // Remove any existing half-time overlay first
-    document.getElementById('halfTimeOverlay')?.remove();
-
-    const [h, a] = match.teams.map(t => t.club);
-    const pos = match.possessionPct ? match.possessionPct() : [50, 50];
-    const s = match.stats;
-
-    const overlay = document.createElement('div');
-    overlay.id = 'halfTimeOverlay';
-    overlay.style.cssText = `
-      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-      background: rgba(10,12,16,0.88); backdrop-filter: blur(14px);
-      z-index: 1200; opacity: 0; transition: opacity 0.4s;
-    `;
-    overlay.innerHTML = `
-      <div style="
-        background: var(--surface); border: 1px solid var(--border);
-        border-radius: 20px; padding: 32px 48px; min-width: 340px; max-width: 480px;
-        text-align: center; box-shadow: 0 8px 60px rgba(0,0,0,0.7);
-      ">
-        <div style="font-size: 11px; letter-spacing: 3px; color: var(--accent); margin-bottom: 12px; font-weight: 700;">HALF TIME</div>
-        <div style="display: flex; align-items: center; justify-content: center; gap: 24px; margin-bottom: 20px;">
-          <div style="text-align:center">
-            <canvas id="htBadgeH" width="56" height="56"></canvas>
-            <div style="font-size:11px;margin-top:4px;color:var(--muted)">${h.code}</div>
-          </div>
-          <div style="font-size: 48px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text);">
-            ${match.score[0]}&nbsp;<span style="color:var(--muted);">–</span>&nbsp;${match.score[1]}
-          </div>
-          <div style="text-align:center">
-            <canvas id="htBadgeA" width="56" height="56"></canvas>
-            <div style="font-size:11px;margin-top:4px;color:var(--muted)">${a.code}</div>
-          </div>
-        </div>
-        <div style="margin-bottom: 20px;">
-          ${s ? `
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
-              <span style="color:var(--text)">${s.shots?.[0] ?? 0}</span>
-              <span style="color:var(--muted)">SHOTS</span>
-              <span style="color:var(--text)">${s.shots?.[1] ?? 0}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:12px;">
-              <span style="color:var(--text)">${Math.round(pos[0])}%</span>
-              <span style="color:var(--muted)">POSSESSION</span>
-              <span style="color:var(--text)">${Math.round(pos[1])}%</span>
-            </div>
-          ` : ''}
-        </div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:16px;">SECOND HALF STARTING SHORTLY…</div>
-        <button id="htContinueBtn" style="
-          background: var(--accent); color: #000; border: none; border-radius: 8px;
-          padding: 10px 28px; font-size: 13px; font-weight: 700; letter-spacing: 1px;
-          cursor: pointer; width: 100%; font-family: inherit;
-        ">CONTINUE</button>
-      </div>
-    `;
-
-    document.body.appendChild(overlay);
-    requestAnimationFrame(() => overlay.style.opacity = '1');
-
-    const drawBadges = () => {
-      drawBadge(overlay.querySelector('#htBadgeH'), h);
-      drawBadge(overlay.querySelector('#htBadgeA'), a);
-    };
-    setTimeout(drawBadges, 50);
-
-    const dismiss = () => {
-      overlay.style.opacity = '0';
-      setTimeout(() => overlay.remove(), 400);
-      onContinue?.();
-    };
-
-    overlay.querySelector('#htContinueBtn').onclick = dismiss;
-    // Auto-dismiss after a few seconds
-    const autoTimer = setTimeout(dismiss, 3000);
-    overlay.querySelector('#htContinueBtn').addEventListener('click', () => clearTimeout(autoTimer));
-  }
+  /* half-time overlay: RETIRED (V2 Phase 4) — replaced by showHalfTimeMenu in ui/matchFlow.js */
 
   /* ---------------- career / classic mode ---------------- */
 
@@ -596,10 +522,7 @@ export class Screens {
           const canvas = tile.querySelector('.badge-canvas');
           drawBadge(canvas, CLUBS[clubId]);
           tile.onclick = () => {
-            this.save.career.clubId = clubId;
-            this.save.career.week = 1;
-            // reset stats
-            this.save.career.stats = CLUBS.map(c => ({ id: c.id, pld: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }));
+            this.save.career = newCareer(clubId);
             localStorage.setItem('dreamkick.v2', JSON.stringify(this.save));
             Toast.show(`Signed contract with ${CLUBS[clubId].name}!`, 'success');
             this.triggerWipe(() => this.career());
@@ -613,26 +536,23 @@ export class Screens {
       return;
     }
 
-    // 2. Main career screen dashboard
-    const myClub = CLUBS[this.save.career.clubId];
-    
-    // Sort standings by points, goal diff, goals for
-    const sortedStats = [...this.save.career.stats].sort((a, b) => {
-      if (b.pts !== a.pts) return b.pts - a.pts;
-      const diffA = a.gf - a.ga;
-      const diffB = b.gf - b.ga;
-      if (diffB !== diffA) return diffB - diffA;
-      return b.gf - a.gf;
-    });
-    
-    // Determine opponent for the week (fixtures rotation)
-    // We match each club systematically. For week W, my club plays a opponent.
-    const oppId = (this.save.career.clubId + this.save.career.week) % CLUBS.length;
-    const opponent = CLUBS[oppId === this.save.career.clubId ? (oppId + 1) % CLUBS.length : oppId];
-    
+    // 2. Season over → summary + roll into next season
+    const career = this.save.career;
+    if (seasonOver(career)) { this.seasonSummary(el, career); return; }
+
+    // 3. Main career dashboard
+    const myClub = CLUBS[career.clubId];
+    const table = leagueTable(career);
+    const pos = leaguePosition(career);
+    const form = teamFormLetters(career);
+    const scorer = topScorer(career);
+    const fx = userFixture(career);
+    const opponent = CLUBS[fx.home === career.clubId ? fx.away : fx.home];
+    const atHome = fx.home === career.clubId;
+
     el.innerHTML = `
-      <div class="screen-title">${icon('trophy', 26)} CAREER MODE — WEEK ${this.save.career.week}</div>
-      
+      <div class="screen-title">${icon('trophy', 26)} SEASON ${career.season} — MATCHDAY ${career.week}/${totalRounds(career)}</div>
+
       <div class="career-layout">
         <!-- Standings Table -->
         <div class="panel career-table-panel spotlight-card stagger-1" style="max-height: 480px; overflow-y: auto;">
@@ -640,110 +560,171 @@ export class Screens {
           <table class="career-table">
             <thead>
               <tr>
-                <th>#</th>
-                <th>CLUB</th>
-                <th style="text-align: center;">PLD</th>
-                <th style="text-align: center;">GD</th>
-                <th style="text-align: center; color: var(--accent);">PTS</th>
+                <th>#</th><th>CLUB</th>
+                <th style="text-align:center;">PLD</th>
+                <th style="text-align:center;">W</th>
+                <th style="text-align:center;">D</th>
+                <th style="text-align:center;">L</th>
+                <th style="text-align:center;">GD</th>
+                <th style="text-align:center; color: var(--accent);">PTS</th>
               </tr>
             </thead>
             <tbody>
-              ${sortedStats.map((st, idx) => {
+              ${table.map((st, idx) => {
                 const club = CLUBS[st.id];
                 const isMe = club.id === myClub.id;
-                const gd = st.gf - st.ga;
                 return `
-                  <tr class="${isMe ? 'my-club' : ''} stagger-${Math.min(5, Math.floor(idx/3)+1)}">
+                  <tr class="${isMe ? 'my-club' : ''} stagger-${Math.min(5, Math.floor(idx / 3) + 1)}">
                     <td>${idx + 1}</td>
-                    <td>
-                      <canvas class="badge-mini" width="22" height="22" data-club="${club.id}"></canvas>
-                      ${club.name}
-                    </td>
-                    <td style="text-align: center; font-variant-numeric: tabular-nums;">${st.pld}</td>
-                    <td style="text-align: center; font-variant-numeric: tabular-nums;">${gd > 0 ? '+' : ''}${gd}</td>
-                    <td style="text-align: center; font-variant-numeric: tabular-nums; font-weight: 800;">${st.pts}</td>
-                  </tr>
-                `;
+                    <td><canvas class="badge-mini" width="22" height="22" data-club="${club.id}"></canvas>${club.name}</td>
+                    <td style="text-align:center;">${st.pld}</td>
+                    <td style="text-align:center;">${st.w}</td>
+                    <td style="text-align:center;">${st.d}</td>
+                    <td style="text-align:center;">${st.l}</td>
+                    <td style="text-align:center;">${st.gd > 0 ? '+' : ''}${st.gd}</td>
+                    <td style="text-align:center; font-weight:800;">${st.pts}</td>
+                  </tr>`;
               }).join('')}
             </tbody>
           </table>
         </div>
-        
-        <!-- Fixture / Side Panel -->
+
+        <!-- Side Panel -->
         <div class="career-side-panel">
           <div class="panel spotlight-card stagger-2" style="padding: 16px;">
-            <div class="section-tag">NEXT MATCH</div>
-            <div class="fixture-snap-card" style="border: none; box-shadow: none; padding: 10px 0 0 0;">
+            <div class="section-tag">NEXT MATCH ${atHome ? '(HOME)' : '(AWAY)'}</div>
+            <div class="fixture-snap-card" style="border:none; box-shadow:none; padding:10px 0 0 0;">
               <div class="fixture-teams-row">
-                <div class="fixture-team-item">
-                  <canvas id="fixBadgeMe" width="56" height="56"></canvas>
-                  <div>${myClub.code}</div>
-                </div>
+                <div class="fixture-team-item"><canvas id="fixBadgeMe" width="56" height="56"></canvas><div>${myClub.code}</div></div>
                 <div class="fixture-vs">VS</div>
-                <div class="fixture-team-item">
-                  <canvas id="fixBadgeOpp" width="56" height="56"></canvas>
-                  <div>${opponent.code}</div>
-                </div>
+                <div class="fixture-team-item"><canvas id="fixBadgeOpp" width="56" height="56"></canvas><div>${opponent.code}</div></div>
               </div>
-              <div class="fixture-info" style="margin-top: 10px; text-align: center;">
-                WEEK ${this.save.career.week} · vs ${opponent.name}
+              <div class="fixture-info" style="margin-top:10px; text-align:center;">
+                MATCHDAY ${career.week} · ${atHome ? 'vs' : '@'} ${opponent.name}
               </div>
             </div>
           </div>
-          
-          <div class="panel spotlight-card stagger-3" style="padding: 16px; display: flex; flex-direction: column; gap: 10px;">
-            <div class="section-tag">OPTIONS</div>
-            <button class="btn primary magnetic-btn" id="careerPlayBtn" style="width: 100%; justify-content: center;">
-              ${icon('play', 18)} PLAY MATCH
-            </button>
-            <button class="btn magnetic-btn" id="careerResetBtn" style="width: 100%; justify-content: center; border-color: var(--warn); color: var(--warn);">
-              RESET CAREER
-            </button>
+
+          <div class="panel spotlight-card stagger-3" style="padding: 14px 16px;">
+            <div class="section-tag">DASHBOARD</div>
+            <div class="career-dash-row"><span>Position</span><b>${pos}${['st','nd','rd'][pos-1] || 'th'}</b></div>
+            <div class="career-dash-row"><span>Form</span>
+              <span class="form-chips">${form.length ? form.map(f => `<i class="fc-${f}">${f}</i>`).join('') : '<i class="dim">—</i>'}</span>
+            </div>
+            <div class="career-dash-row"><span>Top scorer</span><b>${scorer.season.goals > 0 ? `${scorer.name.split(' ').pop()} (${scorer.season.goals})` : '—'}</b></div>
+          </div>
+
+          <div class="panel spotlight-card stagger-4" style="padding: 16px; display: flex; flex-direction: column; gap: 8px;">
+            <button class="btn primary magnetic-btn" id="careerPlayBtn" style="width:100%; justify-content:center;">${icon('play', 18)} PLAY MATCH</button>
+            <button class="btn magnetic-btn" id="careerSimBtn" style="width:100%; justify-content:center;">⏩ SIM FIXTURE</button>
+            <button class="btn magnetic-btn" id="careerSquadBtn" style="width:100%; justify-content:center;">👥 SQUAD</button>
+            <button class="btn magnetic-btn" id="careerResetBtn" style="width:100%; justify-content:center; border-color:#e05263; color:#e05263;">RESET CAREER</button>
           </div>
         </div>
       </div>
-      
-      <div class="select-actions stagger-4" style="margin-top: 10px;">
+
+      <div class="select-actions stagger-5" style="margin-top: 10px;">
         <button class="btn back magnetic-btn" id="careerMenuBtn">${icon('home', 16)} MAIN MENU</button>
       </div>
     `;
-    
-    // Draw mini badges
+
     setTimeout(() => {
-      el.querySelectorAll('.badge-mini').forEach(c => {
-        const clubId = parseInt(c.dataset.club);
-        drawBadge(c, CLUBS[clubId]);
-      });
+      el.querySelectorAll('.badge-mini').forEach(c => drawBadge(c, CLUBS[parseInt(c.dataset.club)]));
       drawBadge(el.querySelector('#fixBadgeMe'), myClub);
       drawBadge(el.querySelector('#fixBadgeOpp'), opponent);
     }, 50);
-    
+
     el.querySelector('#careerMenuBtn').onclick = () => this.triggerWipe(() => this.menu());
-    
+
     el.querySelector('#careerPlayBtn').onclick = () => {
       const opts = {
-        homeClub: myClub,
-        awayClub: opponent,
-        difficulty: this.sel.difficulty,
-        halfLength: this.sel.half,
-        isCareer: true
+        homeClub: myClub, awayClub: opponent,
+        difficulty: this.sel.difficulty, halfLength: this.sel.half, isCareer: true,
       };
       this.triggerWipe(() => this.preMatch(opts));
     };
-    
+
+    el.querySelector('#careerSimBtn').onclick = () => {
+      completeRound(career, null); // quick-sims the user fixture too
+      syncSeasonStats(career);
+      localStorage.setItem('dreamkick.v2', JSON.stringify(this.save));
+      Toast.show('Matchday simulated.', 'success');
+      this.triggerWipe(() => this.career());
+    };
+
+    el.querySelector('#careerSquadBtn').onclick = () => this.squadModal(myClub);
+
     el.querySelector('#careerResetBtn').onclick = () => {
-      if (confirm("Are you sure you want to reset your career progress?")) {
-        this.save.career.clubId = null;
-        this.save.career.week = 1;
-        this.save.career.stats = CLUBS.map(c => ({ id: c.id, pld: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }));
+      if (confirm('Are you sure you want to reset your career progress?')) {
+        this.save.career = { version: CAREER_VERSION, clubId: null };
         localStorage.setItem('dreamkick.v2', JSON.stringify(this.save));
-        Toast.show("Career progress reset.", "error");
+        Toast.show('Career progress reset.', 'error');
         this.triggerWipe(() => this.career());
       }
     };
-    
+
     this.show(el);
     this.setupInteractions(el);
+  }
+
+  /** End-of-season summary → progression → next season. */
+  seasonSummary(el, career) {
+    const table = leagueTable(career);
+    const champion = CLUBS[table[0].id];
+    const myPos = leaguePosition(career);
+    const scorer = topScorer(career);
+    el.innerHTML = `
+      <div class="screen-title">${icon('trophy', 26)} SEASON ${career.season} COMPLETE</div>
+      <div class="panel spotlight-card stagger-1" style="padding: 26px 34px; text-align:center; max-width: 440px;">
+        <canvas id="champBadge" width="72" height="72"></canvas>
+        <div class="section-tag" style="margin-top:10px;">CHAMPIONS</div>
+        <div style="font-size:22px; font-weight:900;">${champion.name}</div>
+        <div class="dim" style="margin-top:12px;">You finished <b>${myPos}${['st','nd','rd'][myPos-1] || 'th'}</b> with ${table.find(r => r.id === career.clubId).pts} points.</div>
+        <div class="dim" style="margin-top:4px;">Top scorer: ${scorer.name} (${scorer.season.goals})</div>
+        <div class="dim" style="margin-top:10px; font-size:11px;">Players develop over the summer — young talents grow, veterans decline.</div>
+      </div>
+      <div class="select-actions stagger-2">
+        <button class="btn back magnetic-btn" id="ssMenuBtn">${icon('home', 16)} MAIN MENU</button>
+        <button class="btn primary big magnetic-btn" id="ssNextBtn">${icon('restart', 16)} START SEASON ${career.season + 1}</button>
+      </div>`;
+    setTimeout(() => drawBadge(el.querySelector('#champBadge'), champion), 50);
+    el.querySelector('#ssMenuBtn').onclick = () => this.triggerWipe(() => this.menu());
+    el.querySelector('#ssNextBtn').onclick = () => {
+      const { next } = endSeason(career);
+      this.save.career = next;
+      localStorage.setItem('dreamkick.v2', JSON.stringify(this.save));
+      Toast.show(`Season ${next.season} begins!`, 'success');
+      this.triggerWipe(() => this.career());
+    };
+    this.show(el);
+    this.setupInteractions(el);
+  }
+
+  /** Squad list modal — dossier on double-tap (career dashboard). */
+  squadModal(club) {
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop in';
+    modal.style.zIndex = '9001';
+    modal.innerHTML = `
+      <div class="modal-panel" style="max-width: 460px; max-height: 86vh; display:flex; flex-direction:column;">
+        <div class="modal-header"><h2>SQUAD — ${club.name.toUpperCase()}</h2><button class="modal-close">&times;</button></div>
+        <div class="modal-content" id="squadList" style="overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+        <div class="modal-actions"><button class="btn primary modal-ok">CLOSE</button></div>
+      </div>`;
+    document.body.appendChild(modal);
+    const list = modal.querySelector('#squadList');
+    [...club.squad].sort((a, b) => b.overall - a.overall).forEach(p => {
+      const card = renderPlayerCard(p, club.kits.home, {
+        className: 'rowcard',
+        onClick: () => showPlayerInfoPopup(p, club.kits.home),
+        onDblClick: () => showPlayerInfoPopup(p, club.kits.home),
+      });
+      list.appendChild(card);
+    });
+    const close = () => modal.remove();
+    modal.querySelector('.modal-close').onclick = close;
+    modal.querySelector('.modal-ok').onclick = close;
+    modal.onclick = e => { if (e.target === modal) close(); };
   }
 }
 

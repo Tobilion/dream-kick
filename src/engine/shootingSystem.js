@@ -38,7 +38,7 @@ export class ShootingSystem {
 
     // aim inside the posts, biased by input
     const target = clamp(aimZ, -1, 1) * (PITCH.GOAL_WIDTH / 2 - 0.5);
-    const tz = target + (match.rng() * 2 - 1) * err * 2.4; // bounded meters
+    const tz = target + (match.rng() * 2 - 1) * err * 2.9; // bounded meters
     const dir = norm2(goalX - pl.pos.x, tz - pl.pos.z);
 
     const lift = clamp(charge, 0, 1) * P.SHOT_LIFT_MAX * (0.35 + (1 - skill) * 0.25 + charge * 0.25);

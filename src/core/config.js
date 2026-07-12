@@ -57,7 +57,7 @@ export const CONFIG = {
     DECISION_INTERVAL: 0.12,   // seconds between decisions per player (staggered)
     PRESSERS: 2,               // defenders actively chasing ball carrier
     PRESS_RADIUS: 26,          // only press when ball within this distance
-    SHOOT_RANGE: 24, SHOOT_ANGLE_MIN: 0.22,
+    SHOOT_RANGE: 28, SHOOT_ANGLE_MIN: 0.22,
     PASS_OPENNESS_LANE: 2.2,   // lane clearance radius considered blocked
     CLEAR_PRESSURE_DIST: 3.2,
     SUPPORT_SHIFT: 0.42,       // how far formation shifts toward ball (0..1)
@@ -68,9 +68,11 @@ export const CONFIG = {
   },
 
   DIFFICULTY: {
-    amateur: { label: 'Amateur', aiSpeed: 0.92, passNoise: 0.24, gkReact: 1.5,  press: 0.7, decision: 1.6 },
-    pro:     { label: 'Pro',     aiSpeed: 1.0,  passNoise: 0.12, gkReact: 1.0,  press: 1.0, decision: 1.0 },
-    legend:  { label: 'Legend',  aiSpeed: 1.06, passNoise: 0.05, gkReact: 0.72, press: 1.35, decision: 0.7 },
+    // decision: AI decision-interval multiplier (lower = faster reactions)
+    // quality: chance the on-ball AI picks its best-scored option
+    amateur: { label: 'Amateur', aiSpeed: 0.92, quality: 0.6,  gkReact: 1.5,  press: 0.7,  decision: 1.6 },
+    pro:     { label: 'Pro',     aiSpeed: 1.0,  quality: 0.82, gkReact: 1.0,  press: 1.0,  decision: 1.0 },
+    legend:  { label: 'Legend',  aiSpeed: 1.06, quality: 0.95, gkReact: 0.72, press: 1.35, decision: 0.7 },
   },
 
   CAMERA: {

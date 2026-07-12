@@ -17,12 +17,16 @@ import { Hud } from './ui/hud.js';
 import { LineupIntro } from './ui/lineupIntro.js';
 import { showTeamManagementModal } from './ui/teamManagement.js';
 import { showSettingsModal } from './ui/settingsScreen.js';
+import { showHalfTimeMenu, showMatchStatsModal } from './ui/matchFlow.js';
+import { migrateCareer, applyCareerToClubs, userFixture, completeRound, syncSeasonStats } from './core/career.js';
 
 const canvas = document.getElementById('gameCanvas');
 const uiRoot = document.getElementById('ui');
 const hudRoot = document.getElementById('hudRoot');
 
 const save = loadSave();
+migrateCareer(save);            // upgrade any pre-V3 career shape
+applyCareerToClubs(save.career); // re-apply progression + season stats to CLUBS
 const sceneMgr = new SceneMgr(canvas);
 const stadium = new Stadium(sceneMgr.scene, sceneMgr.shadowsOn);
 const cam = new CameraController(sceneMgr.aspect);
@@ -79,6 +83,10 @@ hud = new Hud(hudRoot, {
       setPaused(false);
     } else if (act === 'teamMgmt') {
       showTeamManagementModal(match, 0, () => {});
+    } else if (act === 'stats') {
+      showMatchStatsModal(match);
+    } else if (act === 'replay') {
+      hud.ticker('Instant Replay — coming soon.');
     } else if (act === 'settings') {
       showSettingsModal(save, match, cam, () => {});
     } else if (act === 'simEnd') {
@@ -152,9 +160,16 @@ fsm.register('MATCH', {
             FULL_TIME: 'FULL TIME',
           };
           if (labels[state]) hud.phaseBanner(labels[state]);
-          // Show half-time screen then resume automatically
+          // Full half-time menu (V2 Phase 4): management/stats/settings/sim/forfeit/continue
           if (state === MATCH_STATE.HALF_TIME) {
-            setTimeout(() => screens.halfTime(match, () => match.resumeFromHalfTime()), 400);
+            setTimeout(() => showHalfTimeMenu(match, {
+              onTeamMgmt: () => showTeamManagementModal(match, 0, () => {}),
+              onSettings: () => showSettingsModal(save, match, cam, () => {}),
+              onToast: msg => hud.ticker(msg),
+              onSimEnd: () => match.simToEnd(),
+              onForfeit: () => match.forfeit(),
+              onContinue: () => match.resumeFromHalfTime(),
+            }), 400);
           }
           if (state === MATCH_STATE.FULL_TIME) {
             onFullTime();
@@ -173,6 +188,7 @@ fsm.register('MATCH', {
       },
     });
     match._opts = opts;
+    window.__match = match; // debug/testing handle
 
     // Build 3D player meshes and wire back-reference for subs
     for (const team of match.teams) {
@@ -242,45 +258,16 @@ function onFullTime() {
 }
 
 function updateCareerStandings() {
-  const myClubId = save.career.clubId;
-  const oppClubId = match._opts.awayClub.id;
-  const myScore = match.score[0];
-  const oppScore = match.score[1];
-
-  const updateRow = (stats, gf, ga) => {
-    if (!stats) return;
-    stats.pld++;
-    stats.gf += gf; stats.ga += ga;
-    if (gf > ga) { stats.w++; stats.pts += 3; }
-    else if (gf === ga) { stats.d++; stats.pts += 1; }
-    else { stats.l++; }
-  };
-
-  updateRow(save.career.stats.find(s => s.id === myClubId), myScore, oppScore);
-  updateRow(save.career.stats.find(s => s.id === oppClubId), oppScore, myScore);
-
-  // Simulate other club fixtures this week
-  const week = save.career.week;
-  const stats = save.career.stats;
-  const played = new Set([myClubId, oppClubId]);
-  for (let i = 0; i < stats.length; i++) {
-    const st = stats[i];
-    if (played.has(st.id)) continue;
-    const oppIdx = (st.id + week) % stats.length;
-    const oppSt = stats[oppIdx];
-    if (oppSt && !played.has(oppSt.id)) {
-      played.add(st.id); played.add(oppSt.id);
-      const r1 = CLUBS[st.id]?.rating || 75;
-      const r2 = CLUBS[oppSt.id]?.rating || 75;
-      let s1 = Math.floor(Math.random() * 2), s2 = Math.floor(Math.random() * 2);
-      if (r1 > r2 + 4) s1 += Math.floor(Math.random() * 2);
-      else if (r2 > r1 + 4) s2 += Math.floor(Math.random() * 2);
-      updateRow(st, s1, s2);
-      updateRow(oppSt, s2, s1);
-    }
-  }
-
-  save.career.week++;
+  // V3 Phase D: record the user's real result into the round-robin fixture
+  // (respecting home/away), sim the other nine fixtures, persist.
+  const career = save.career;
+  const fx = userFixture(career);
+  if (!fx) return;
+  const iAmHome = fx.home === career.clubId;
+  // in a career match the user club is always match.teams[0]
+  const mine = match.score[0], theirs = match.score[1];
+  completeRound(career, iAmHome ? { hs: mine, as: theirs } : { hs: theirs, as: mine });
+  syncSeasonStats(career);
   writeSave(save);
 }
 

@@ -5,12 +5,13 @@ import { clamp, dist2, norm2, makeRng } from '../core/math.js';
 import { BallPhysics } from './ballPhysics.js';
 import { Team } from './team.js';
 import { PSTATE } from './player.js';
-import { updateAI, bestPass } from './ai.js';
+import { updateAI } from './ai.js';
 import { updateGoalkeepers } from './goalkeeper.js';
 import { checkBoundaries, restartBallSpot, restartTaker } from './rules.js';
 import { PossessionSystem } from './possessionSystem.js';
 import { PassingSystem } from './passingSystem.js';
 import { ShootingSystem } from './shootingSystem.js';
+import { foldSeasonStats } from './ratings.js';
 
 const M = CONFIG.MATCH;
 const P = CONFIG.PLAYER;
@@ -43,6 +44,7 @@ export class Match {
     this.ball = new BallPhysics();
     this.rng = makeRng(opts.seed ?? ((Date.now() & 0xffffff) ^ 0x9e3779));
     this.owner = null;
+    this._nextKickoff = null; // set after a goal: conceding team kicks off
     this.controlled = null;
     
     this.state = MATCH_STATE.PRE_MATCH;
@@ -66,9 +68,25 @@ export class Match {
 
     this.possessionSystem = new PossessionSystem();
     this._opts = opts;
+    this.syncAttackDirs(); // directions always derive from attackingDir()
 
     // Start in PRE_MATCH state
     this.go(MATCH_STATE.PRE_MATCH);
+  }
+
+  /**
+   * SINGLE SOURCE OF TRUTH for attacking direction (V3 Phase A).
+   * Derived from team index + current half; everything else (goal detection,
+   * kickoffs, AI, camera) must read this — never keep its own side boolean.
+   * Home (0) attacks +x in the first half.
+   */
+  attackingDir(teamIdx) {
+    return (teamIdx === 0 ? 1 : -1) * (this.half === 1 ? 1 : -1);
+  }
+
+  /** Push the derived directions onto the Team objects (idempotent). */
+  syncAttackDirs() {
+    for (const t of this.teams) t.attackDir = this.attackingDir(t.index);
   }
 
   get matchClockSeconds() {
@@ -100,18 +118,26 @@ export class Match {
     this.events.onStateChange?.(state);
 
     if (state === MATCH_STATE.KICKOFF) {
-      // Determine kicking team: home kicks off 1st half, away kicks off 2nd half
-      const kicker = this.half === 1 ? 0 : 1;
+      // Kicker: after a goal the CONCEDING team kicks off; otherwise home
+      // starts the 1st half and away starts the 2nd.
+      const kicker = this._nextKickoff ?? (this.half === 1 ? 0 : 1);
+      this._nextKickoff = null;
       this.setupKickoff(kicker);
     } else if (state === MATCH_STATE.HALF_TIME) {
       this.events.onCommentary?.('Half time!');
       this.events.onPhase?.('HALF_TIME');
       // UI overlay (shown by main.js onStateChange) will call startSecondHalf()
     } else if (state === MATCH_STATE.SECOND_HALF) {
-      this.half = 2;
-      this.clock = 0;
-      for (const t of this.teams) t.attackDir *= -1;
+      // Sides switch ONLY on the real half-time transition. Post-goal kickoffs
+      // re-enter SECOND_HALF too — they must NOT flip sides or reset the clock
+      // (this was the "teams switch sides after every goal" bug).
+      if (prev === MATCH_STATE.HALF_TIME) {
+        this.half = 2;
+        this.clock = 0;
+        this.syncAttackDirs();
+      }
     } else if (state === MATCH_STATE.FULL_TIME) {
+      foldSeasonStats(this); // per-player match stats → season totals + form
       this.events.onFullTime?.();
     }
   }
@@ -270,12 +296,23 @@ export class Match {
   onGoal(scoringTeam) {
     this.score[scoringTeam]++;
     this.lastScoringTeam = scoringTeam;
+    this._nextKickoff = 1 - scoringTeam; // conceding team restarts
     const scorer = this.ball.lastTouch && this.ball.lastTouch.team === scoringTeam
       ? this.ball.lastTouch : this.teams[scoringTeam].players[9];
     this.scorers[scoringTeam].push({ name: scorer.data.name, minute: this.displayMinute || 1 });
+
+    // per-player stat line: goal + assist (last completed same-team pass to the scorer)
+    scorer.matchStats.goals++;
+    const ac = this._assistCandidate;
+    if (ac && ac.receiver === scorer && ac.passer.team === scoringTeam && ac.passer !== scorer) {
+      ac.passer.matchStats.assists++;
+    }
+    this._assistCandidate = null;
     this.stats.onTarget[scoringTeam]++;
     if (this.stats.onTarget[scoringTeam] > this.stats.shots[scoringTeam]) {
+      // goal without a recorded strike (deflection etc.) — credit the scorer
       this.stats.shots[scoringTeam] = this.stats.onTarget[scoringTeam];
+      scorer.matchStats.shots++;
     }
     for (const p of this.teams[scoringTeam].players) p.act(PSTATE.CELEBRATE, M.GOAL_CELEBRATION);
     this.phase = 'GOAL_CELEBRATION';
@@ -283,6 +320,7 @@ export class Match {
   }
 
   applyUserInput(dt, input) {
+    if (this._opts?.aiOnly) return; // AI-vs-AI sims: no user cursor
     if (!input) return;
     const pl = this.controlled;
     if (!pl || pl.team !== this.userTeam) { 
@@ -392,6 +430,7 @@ export class Match {
   }
 
   gkClaim(gk) {
+    gk.matchStats.saves++;
     this.owner = gk;
     gk.hasBall = true;
     this.ball.lastTouch = gk; 

@@ -31,6 +31,7 @@ export class PassingSystem {
 
     if (kind === 'shot') {
       match.stats.shots[pl.team]++;
+      pl.matchStats.shots++;
       match.events.onKick?.('shot', power / P.SHOT_POWER_MAX);
     } else {
       match.stats.passes[pl.team]++;
@@ -78,7 +79,7 @@ export class PassingSystem {
       lift = 0;
     }
 
-    match.pendingPass = { team: pl.team, receiver: mate };
+    match.pendingPass = { team: pl.team, receiver: mate, passer: pl };
     return this.strike(match, pl, dir, power, lift, 0, long ? 'longpass' : 'pass');
   }
 

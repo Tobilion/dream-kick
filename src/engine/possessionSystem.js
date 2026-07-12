@@ -47,10 +47,12 @@ export class PossessionSystem {
     }
     if (!nearest) return;
 
-    // fast incoming ball → first touch: kill most of its speed, brief delay
+    // fast incoming ball → first touch: kill most of its speed, brief delay.
+    // Better dribblers control it faster (dribbling → control).
     const incoming = b.speed;
     if (incoming > 7 && nearest.firstTouchT <= 0) {
-      nearest.firstTouchT = P.FIRST_TOUCH_TIME * clamp(incoming / 14, 0.7, 1.6);
+      const control = 1.3 - ((nearest.data.dribble ?? 65) / 100) * 0.6;
+      nearest.firstTouchT = P.FIRST_TOUCH_TIME * clamp(incoming / 14, 0.7, 1.6) * control;
       const dir = norm2(b.vel.x, b.vel.z);
       b.vel.x = dir.x * 1.6; b.vel.z = dir.z * 1.6; b.vel.y = 0;
       b.spin = 0;
@@ -73,9 +75,17 @@ export class PossessionSystem {
     b.lastTouch = player;
     b.lastTeam = player.team;
 
-    // pass completion tracking
+    // pass completion tracking (+ assist candidate for goal attribution)
     if (match.pendingPass) {
-      if (player.team === match.pendingPass.team) match.stats.passOk[player.team]++;
+      if (player.team === match.pendingPass.team) {
+        match.stats.passOk[player.team]++;
+        const passer = match.pendingPass.passer;
+        if (passer && passer !== player) {
+          match._assistCandidate = { passer, receiver: player };
+        }
+      } else {
+        match._assistCandidate = null; // intercepted
+      }
       match.pendingPass = null;
     }
 
@@ -126,13 +136,15 @@ export class PossessionSystem {
     const d = dist2(tackler.pos.x, tackler.pos.z, match.ball.pos.x, match.ball.pos.z);
     if (d > P.TACKLE_RANGE) return false;
 
+    // defending → tackle contest; physical + dribbling → shielding the ball
     const def = tackler.data.defend;
-    const shield = (owner.data.physical * 0.6 + owner.data.pace * 0.4);
+    const shield = owner.data.physical * 0.55 + (owner.data.dribble ?? owner.data.pace) * 0.45;
     const winP = clamp(0.42 + (def - shield) / 150, 0.15, 0.85);
 
     if (match.rng() < winP) {
       // won: ball pops loose toward the tackler (deterministic direction)
       match.stats.tackles[tackler.team]++;
+      tackler.matchStats.tackles++;
       const dir = norm2(tackler.pos.x - owner.pos.x, tackler.pos.z - owner.pos.z);
       this.release(match, 0.6);
       match.ball.lastTouch = tackler;

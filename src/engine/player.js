@@ -45,6 +45,8 @@ export class PlayerEntity {
     this.hasBall = false;            // tracks possession for dribbling speed reduction
     this.firstTouchT = 0;            // control delay when receiving a pass (PossessionSystem)
     this.tackleCooldownT = 0;        // re-tackle lockout after a failed tackle
+    // per-match stat line (V3 Phase C) — feeds match ratings + season stats
+    this.matchStats = { goals: 0, assists: 0, shots: 0, onTarget: 0, tackles: 0, saves: 0 };
   }
 
   get maxSpeed() {

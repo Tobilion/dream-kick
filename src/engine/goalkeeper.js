@@ -76,7 +76,7 @@ function maybeDive(match, team, gk, dt) {
     match.gkClaim(gk);
     return;
   }
-  if (Math.abs(dz) < 6.5) {
+  if (Math.abs(dz) < 7.4) {
     gk.act(PSTATE.DIVING, P.GK_DIVE_DURATION, norm2(0, Math.sign(dz)));
     gk.diveSave = { z: crossZ, power: match.ball.speed };
     gk.reactT = 0;

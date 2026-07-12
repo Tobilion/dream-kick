@@ -16,15 +16,16 @@ export function checkBoundaries(match) {
 
   // over a goal line?
   if (Math.abs(x) > HALF_L + CONFIG.BALL.RADIUS) {
+    // Which team attacks THIS end — from the single source of truth
+    // (match.attackingDir), never from cached side booleans.
+    const attackerOfEnd = match.attackingDir(0) === Math.sign(x) ? 0 : 1;
     const inMouthZ = Math.abs(z) < PITCH.GOAL_WIDTH / 2;
     const underBar = y < PITCH.GOAL_HEIGHT;
     if (inMouthZ && underBar && Math.abs(x) < HALF_L + PITCH.GOAL_DEPTH) {
-      // goal for the team attacking this end
-      const scoringTeam = match.teams[0].attackDir === Math.sign(x) ? 0 : 1;
-      return { type: 'GOAL', scoringTeam };
+      return { type: 'GOAL', scoringTeam: attackerOfEnd };
     }
     // out for corner or goal kick — depends on who touched last
-    const defendingTeam = match.teams[0].attackDir === Math.sign(x) ? 1 : 0;
+    const defendingTeam = 1 - attackerOfEnd;
     if (b.lastTeam === defendingTeam) {
       return { type: 'CORNER', team: 1 - defendingTeam, x: Math.sign(x) * (HALF_L - 0.5), z: Math.sign(z || 1) * (HALF_W - 0.5) };
     }
