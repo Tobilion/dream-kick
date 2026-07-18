@@ -789,7 +789,39 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .mstat-bar i:first-child { background: var(--accent); transition: width 0.6s var(--ease); }
 .mstat-bar i:last-child { background: #3b6fd4; transition: width 0.6s var(--ease); }
 
+/* Results screen: top-aligned so tall content scrolls instead of clipping the
+   header (justify-content:center + overflow cuts off the top irrecoverably). */
+.results-screen { justify-content: flex-start; }
+.results-grid {
+  display: grid; grid-template-columns: minmax(280px, 420px) minmax(300px, 480px);
+  gap: 16px; align-items: start; width: min(940px, 100%);
+}
+@media (max-width: 880px) { .results-grid { grid-template-columns: 1fr; } }
+
 .ratings-panel { padding: 14px 18px; }
+
+/* Career hero strip (V4 polish — SportSim-pro console header language) */
+.career-screen { justify-content: flex-start; }
+.career-hero {
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  width: min(1040px, 100%); padding: 14px 20px;
+  background: linear-gradient(100deg, rgba(0,212,163,0.10), rgba(255,255,255,0.02) 55%);
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+  flex-wrap: wrap;
+}
+.ch-club { display: flex; align-items: center; gap: 14px; }
+.ch-name { font-weight: 900; font-size: clamp(17px, 3vw, 24px); letter-spacing: 2px; }
+.ch-sub { font-size: 10px; letter-spacing: 2px; color: var(--muted); margin-top: 3px; }
+.ch-stats { display: flex; gap: 10px; flex-wrap: wrap; }
+.ch-stat {
+  min-width: 84px; padding: 8px 14px; text-align: center;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 10px;
+}
+.ch-stat b { display: block; font-size: 19px; font-weight: 900; }
+.ch-stat span { font-size: 9px; letter-spacing: 2px; color: var(--muted); }
+.news-line { font-size: 11.5px; color: var(--muted); padding: 3px 0; border-bottom: 1px dashed rgba(255,255,255,0.05); }
+.news-line:last-child { border-bottom: none; }
 .ratings-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 22px; text-align: left; }
 .rr-club { font-size: 10px; font-weight: 900; color: var(--muted); letter-spacing: 2px; margin-bottom: 6px; }
 .rating-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; }

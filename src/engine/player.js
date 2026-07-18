@@ -40,7 +40,7 @@ export class PlayerEntity {
     this.diveDir = { x: 0, z: 0 };
 
     this.home = { x: 0, z: 0 };      // formation anchor (updated by team)
-    this.aiTimer = Math.random() * 0.2; // stagger decisions
+    this.aiTimer = 0.1; // stagger set from match.rng after construction (determinism)
     this.controlCooldown = 0;        // can't re-take touch immediately after kicking
     this.hasBall = false;            // tracks possession for dribbling speed reduction
     this.firstTouchT = 0;            // control delay when receiving a pass (PossessionSystem)

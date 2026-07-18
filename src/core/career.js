@@ -5,10 +5,12 @@
  * progression (age curves from Sportsim-pro weeklyDevelopment, simplified).
  * Persisted inside the existing dreamkick.v2 save under save.career.
  */
-import { CLUBS, overallOf, playerForm } from '../data/teams.js';
+import { CLUBS, overallOf, playerForm, wageOf, makeYouthPlayer } from '../data/teams.js';
 import { makeRng, clamp, irand } from './math.js';
+import { initFinance, wageBill, applyMatchday, seasonPrize, saleFee } from './finance.js';
+import { marketTick } from './transfers.js';
 
-export const CAREER_VERSION = 3;
+export const CAREER_VERSION = 4;
 
 /* ---------------- fixtures: circle-method round robin ---------------- */
 
@@ -43,17 +45,27 @@ export function newCareer(clubId, seasonNumber = 1, history = []) {
     history,                       // [{season, position, champion, points}]
     playerDev: {},                 // playerId → {age, d:{pace,shoot,pass,dribble,defend,physical}}
     seasonStats: {},               // playerId → {apps,goals,assists,tackles,saves,ratings[]} (user club)
+    finance: initFinance(CLUBS[clubId].rating), // V4 Phase A
+    transfers: [],                 // [{club, outId, inPlayer}] — replayed onto CLUBS at boot
+    ytSeq: 1,                      // youth-id counter (runtime ids must not collide with pl_N)
+    market: null,                  // V4 Phase B: lazily created by ensureMarket()
   };
 }
 
-/** Migrate any pre-V3 career shape (old: {clubId, week, stats[]}). */
+/** Migrate any older career shape. V3→V4 upgrades in place (adds finance). */
 export function migrateCareer(save) {
   const c = save.career;
   if (!c || c.clubId === null || c.clubId === undefined) {
     save.career = { version: CAREER_VERSION, clubId: null };
     return save.career;
   }
-  if (c.version !== CAREER_VERSION) {
+  c.clubId = Number(c.clubId); // old saves could hold a string id → breaks === checks
+  if (c.version === 3) {
+    c.version = 4;
+    c.finance = initFinance(CLUBS[c.clubId].rating);
+    c.transfers = [];
+    c.ytSeq = 1;
+  } else if (c.version !== CAREER_VERSION) {
     save.career = newCareer(c.clubId, 1, []);
   }
   return save.career;
@@ -110,7 +122,10 @@ export function teamFormLetters(career, clubId = career.clubId, n = 5) {
 /* ---------------- playing / simming a round ---------------- */
 
 function quickSim(rng, homeClub, awayClub) {
-  const edge = (homeClub.rating - awayClub.rating) * 0.06 + 0.25; // home advantage
+  // defensive: a NaN rating would make every rng() comparison false → all 0-0
+  const hr = Number.isFinite(homeClub?.rating) ? homeClub.rating : 75;
+  const ar = Number.isFinite(awayClub?.rating) ? awayClub.rating : 75;
+  const edge = (hr - ar) * 0.06 + 0.25; // home advantage
   const hExp = clamp(1.35 + edge, 0.3, 3.4);
   const aExp = clamp(1.1 - edge, 0.25, 3.2);
   const draw = (exp) => { // crude poisson-ish
@@ -128,7 +143,7 @@ function quickSim(rng, homeClub, awayClub) {
  */
 export function completeRound(career, userResult = null) {
   if (seasonOver(career)) return;
-  const rng = makeRng(0xca3e + career.season * 971 + career.week * 131);
+  const rng = makeRng(0xca3e + (Number(career.season) || 1) * 971 + (Number(career.week) || 1) * 131);
   const round = career.rounds[career.week - 1];
   for (const f of round) {
     if (f.played) continue;
@@ -142,7 +157,21 @@ export function completeRound(career, userResult = null) {
     }
     f.played = true;
   }
+  // ---- finance: income − wages for the user's fixture (V4 Phase A) ----
+  const uf = round.find(f => f.home === career.clubId || f.away === career.clubId);
+  if (career.finance && uf) {
+    const isHome = uf.home === career.clubId;
+    const gs = isHome ? uf.hs : uf.as, gc = isHome ? uf.as : uf.hs;
+    applyMatchday(career.finance, {
+      week: career.week,
+      rating: CLUBS[career.clubId].rating,
+      isHome,
+      result: gs > gc ? 'W' : gs < gc ? 'L' : 'D',
+      wages: wageBill(CLUBS[career.clubId].squad),
+    });
+  }
   career.week++;
+  marketTick(career); // V4 Phase B: resolve my sale listings, academy backfill post-window
 }
 
 function attributeSimGoals(career, rng, f) {
@@ -170,6 +199,23 @@ export function syncSeasonStats(career) {
 /** Re-apply persisted career state onto the deterministic CLUBS data (boot). */
 export function applyCareerToClubs(career) {
   if (!career || career.clubId === null || !career.version) return;
+  // squad changes (sales / transfers) — replay BEFORE dev deltas.
+  // Shapes: {outId, inPlayer} swap · {outId, inPlayer:null} remove · {outId:null, inPlayer} append
+  for (const t of career.transfers || []) {
+    const club = CLUBS[t.club];
+    const dupe = t.inPlayer && club.squad.some(p => p.id === t.inPlayer.id);
+    const clone = t.inPlayer
+      ? { ...t.inPlayer, season: { ...t.inPlayer.season, matchRatings: [...(t.inPlayer.season.matchRatings || [])] } }
+      : null;
+    if (t.outId === null) {
+      if (!dupe && clone) club.squad.push(clone);
+      continue;
+    }
+    const i = club.squad.findIndex(p => p.id === t.outId);
+    if (i < 0) continue;
+    if (clone && !dupe) club.squad.splice(i, 1, clone);
+    else if (!clone) club.squad.splice(i, 1);
+  }
   // player development deltas (all clubs)
   for (const club of CLUBS) {
     for (const p of club.squad) {
@@ -181,6 +227,7 @@ export function applyCareerToClubs(career) {
         }
         p.overall = overallOf(p);
       }
+      p.wage = wageOf(p);
     }
   }
   // user club season stats
@@ -210,6 +257,13 @@ export function endSeason(career) {
     points: table.find(r => r.id === career.clubId)?.pts ?? 0,
     topScorer: topScorer(career),
   };
+
+  // ---- finance: prize money + forced sale if still negative (V4 Phase A) ----
+  const fin = career.finance || initFinance(CLUBS[career.clubId].rating);
+  summary.prize = seasonPrize(summary.position);
+  fin.balance += summary.prize;
+  summary.forcedSale = null;
+  if (fin.balance < 0) summary.forcedSale = forceSale(career, fin);
   const history = [...(career.history || []), {
     season: summary.season, position: summary.position,
     champion: summary.champion, points: summary.points,
@@ -240,6 +294,7 @@ export function endSeason(career) {
       }
       p.age++;
       p.overall = overallOf(p);
+      p.wage = wageOf(p);
       p.season = { apps: 0, goals: 0, assists: 0, tackles: 0, saves: 0, matchRatings: [] };
       dev[p.id] = { age: p.age, d };
     }
@@ -247,5 +302,33 @@ export function endSeason(career) {
 
   const next = newCareer(career.clubId, career.season + 1, history);
   next.playerDev = dev;
+  next.finance = { ...fin, lastIncome: 0, lastWages: 0, log: [] };
+  next.transfers = career.transfers || [];
+  next.ytSeq = career.ytSeq || 1;
+  next.market = career.market
+    ? { window: null, listings: [], myListings: [], news: career.market.news }
+    : null;
   return { summary, next };
+}
+
+/**
+ * Budget rule: negative balance at season end forces the sale of the
+ * highest-value non-GK player. Backfilled with a regenerated youth player so
+ * the squad never shrinks. Recorded in career.transfers (replayed at boot).
+ */
+export function forceSale(career, fin = career.finance) {
+  const club = CLUBS[career.clubId];
+  const sellable = club.squad.filter(p => p.pos !== 'GK');
+  const out = [...sellable].sort((a, b) => b.marketValue - a.marketValue)[0];
+  if (!out) return null;
+  const fee = saleFee(out.marketValue);
+  const rng = makeRng(0xf05a + career.season * 331 + (career.ytSeq || 1) * 17);
+  const youth = makeYouthPlayer(rng, club.region, out.pos, `yt_s${career.season}_${career.ytSeq || 1}`);
+  career.ytSeq = (career.ytSeq || 1) + 1;
+  youth.num = out.num;
+  const i = club.squad.indexOf(out);
+  club.squad.splice(i, 1, youth);
+  career.transfers = [...(career.transfers || []), { club: club.id, outId: out.id, inPlayer: youth }];
+  fin.balance += fee;
+  return { player: out.name, pos: out.pos, fee, youth: youth.name };
 }

@@ -111,7 +111,7 @@ export class Team {
       let x = (-HALF_L + t.x * PITCH.LENGTH * 0.86) * dir;
       let z = t.z * HALF_W * 0.85;
       // keep on own half
-      if (x * dir > -1.5) x = -1.5 * dir - Math.random() * 2 * dir;
+      if (x * dir > -1.5) x = -1.5 * dir - (this.rng ? this.rng() : 0.5) * 2 * dir;
       p.pos.x = x; p.pos.z = z;
       p.vel.x = p.vel.z = 0;
       p.facing = dir > 0 ? 0 : Math.PI;

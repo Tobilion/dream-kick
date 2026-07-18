@@ -43,6 +43,12 @@ export class Match {
 
     this.ball = new BallPhysics();
     this.rng = makeRng(opts.seed ?? ((Date.now() & 0xffffff) ^ 0x9e3779));
+    // determinism: no Math.random anywhere in the sim — reseed per-player AI
+    // stagger and give teams the match rng for positioning jitter
+    for (const t of this.teams) {
+      t.rng = this.rng;
+      for (const p of t.players) p.aiTimer = this.rng() * 0.2;
+    }
     this.owner = null;
     this._nextKickoff = null; // set after a goal: conceding team kicks off
     this.controlled = null;
@@ -455,23 +461,23 @@ export class Match {
       const hp = 0.015 + (hClub.rating - aClub.rating) * 0.001;
       const ap = 0.015 + (aClub.rating - hClub.rating) * 0.001;
       const minute = Math.min(90, this.displayMinute + m);
-      if (Math.random() < hp) {
+      if (this.rng() < hp) {
         this.score[0]++;
-        const scorer = this.teams[0].players[Math.floor(Math.random() * 11)];
+        const scorer = this.teams[0].players[Math.floor(this.rng() * 11)];
         this.scorers[0].push({ name: scorer.data.name, minute });
       }
-      if (Math.random() < ap) {
+      if (this.rng() < ap) {
         this.score[1]++;
-        const scorer = this.teams[1].players[Math.floor(Math.random() * 11)];
+        const scorer = this.teams[1].players[Math.floor(this.rng() * 11)];
         this.scorers[1].push({ name: scorer.data.name, minute });
       }
     }
-    
+
     for (let i = 0; i < 2; i++) {
-      this.stats.passes[i] += Math.round(minutesRemaining * (4 + Math.random() * 3));
-      this.stats.passOk[i] += Math.round(this.stats.passes[i] * (0.65 + Math.random() * 0.15));
-      this.stats.tackles[i] += Math.round(minutesRemaining * (1.2 + Math.random() * 1.5));
-      this.stats.shots[i] += Math.round(minutesRemaining * (0.15 + Math.random() * 0.2));
+      this.stats.passes[i] += Math.round(minutesRemaining * (4 + this.rng() * 3));
+      this.stats.passOk[i] += Math.round(this.stats.passes[i] * (0.65 + this.rng() * 0.15));
+      this.stats.tackles[i] += Math.round(minutesRemaining * (1.2 + this.rng() * 1.5));
+      this.stats.shots[i] += Math.round(minutesRemaining * (0.15 + this.rng() * 0.2));
     }
     
     this.half = 2;

@@ -66,9 +66,35 @@ function makePlayer(rng, region, used, pos, num, rating) {
   };
   if (pos === 'GK') { p.pace = clamp(p.pace - 12, 40, 80); }
   p.overall = overallOf(p);
-  // market value: overall + youth premium (peaks ~23, tails off past 30)
+  p.marketValue = valueOf(p);
+  p.wage = wageOf(p);
+  return p;
+}
+
+/** Market value in €m: overall + youth premium (peaks ~23, tails off past 30). */
+export function valueOf(p) {
   const ageFactor = p.age <= 23 ? 1.35 - (23 - p.age) * 0.03 : clamp(1.35 - (p.age - 23) * 0.09, 0.25, 1.35);
-  p.marketValue = Math.round(Math.pow(1.11, p.overall - 60) * 2.2 * ageFactor * 10) / 10; // €m
+  return Math.round(Math.pow(1.11, p.overall - 60) * 2.2 * ageFactor * 10) / 10;
+}
+
+/** Weekly wage in coins, from overall + age (V4 Phase A). */
+export function wageOf(p) {
+  const ageF = p.age <= 23 ? 0.8 : p.age <= 29 ? 1.0 : 1.15;
+  return Math.max(40, Math.round(((p.overall - 40) * 4 * ageF) / 5) * 5);
+}
+
+/**
+ * Regenerated youth player (backfill after a sale so squads never shrink).
+ * Pass a unique `id` (e.g. `yt_s2_3`) — runtime ids must not collide with the
+ * deterministic boot-time `pl_N` sequence.
+ */
+export function makeYouthPlayer(rng, region, pos, id) {
+  const p = makePlayer(rng, region, new Set(), pos, 19, 62);
+  p.age = irand(rng, 17, 19);
+  p.overall = overallOf(p);
+  p.marketValue = valueOf(p);
+  p.wage = wageOf(p);
+  if (id) p.id = id;
   return p;
 }
 

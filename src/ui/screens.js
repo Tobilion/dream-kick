@@ -19,6 +19,18 @@ import {
   CAREER_VERSION, newCareer, seasonOver, userFixture, leagueTable, leaguePosition,
   teamFormLetters, topScorer, totalRounds, completeRound, syncSeasonStats, endSeason,
 } from '../core/career.js';
+import { initFinance, wageBill, seasonProjection } from '../core/finance.js';
+import {
+  ensureMarket, windowOpen, nextWindowWeek, listingPlayer, buyPlayer,
+  listForSale, unlist, suggestedFee, MAX_SQUAD,
+} from '../core/transfers.js';
+
+/** 12500 → "12.5k", -300 → "-300" (coins). */
+function fmtCoins(n) {
+  const a = Math.abs(n);
+  const s = a >= 10000 ? `${Math.round(n / 100) / 10}k` : `${n}`;
+  return s;
+}
 
 let audioCtx = null;
 
@@ -427,27 +439,32 @@ export class Screens {
         <div class="sh-team"><canvas width="90" height="90" id="rbA"></canvas><span>${a.name}</span></div>
       </div>
       <div class="scorers-row stagger-2"><div>${scorerList(0)}</div><div>${scorerList(1)}</div></div>
-      <div class="panel stats-panel spotlight-card stagger-3">
-        ${statRow('POSSESSION %', pos[0], pos[1])}
-        ${statRow('SHOTS', s.shots[0], s.shots[1])}
-        ${statRow('ON TARGET', s.onTarget[0], s.onTarget[1])}
-        ${statRow('PASSES', s.passes[0], s.passes[1])}
-        ${statRow('PASS ACCURACY %', passAcc(0), passAcc(1))}
-        ${statRow('TACKLES', s.tackles[0], s.tackles[1])}
-      </div>
-      <div class="motm-card spotlight-card stagger-4">
-        <canvas width="86" height="86" id="motmP"></canvas>
-        <div style="flex: 1;">
-          <div class="motm-tag">MAN OF THE MATCH</div>
-          <div class="motm-name">${motm.name}</div>
-          <div class="dim" style="margin-top: 2px;">${match.teams[winIdx].club.name} · ${motm.pos} · Match rating ${motmRating.toFixed(1)}</div>
+      <div class="results-grid stagger-3">
+        <div class="panel stats-panel spotlight-card" style="max-width:none;">
+          <div class="section-tag" style="margin-bottom:8px;">MATCH STATS</div>
+          ${statRow('POSSESSION %', pos[0], pos[1])}
+          ${statRow('SHOTS', s.shots[0], s.shots[1])}
+          ${statRow('ON TARGET', s.onTarget[0], s.onTarget[1])}
+          ${statRow('PASSES', s.passes[0], s.passes[1])}
+          ${statRow('PASS ACCURACY %', passAcc(0), passAcc(1))}
+          ${statRow('TACKLES', s.tackles[0], s.tackles[1])}
         </div>
-        <div class="motm-ring-wrap">
-          <svg id="motmRing"></svg>
-          <div class="motm-val" data-counter="${motm.overall}">0</div>
+        <div style="display:flex; flex-direction:column; gap:14px; min-width:0;">
+          <div class="motm-card spotlight-card">
+            <canvas width="86" height="86" id="motmP"></canvas>
+            <div style="flex: 1; min-width:0;">
+              <div class="motm-tag">MAN OF THE MATCH</div>
+              <div class="motm-name">${motm.name}</div>
+              <div class="dim" style="margin-top: 2px;">${match.teams[winIdx].club.name} · ${motm.pos} · Match rating ${motmRating.toFixed(1)}</div>
+            </div>
+            <div class="motm-ring-wrap">
+              <svg id="motmRing"></svg>
+              <div class="motm-val" data-counter="${motm.overall}">0</div>
+            </div>
+          </div>
+          ${ratingsPanelHTML(match, ratings)}
         </div>
       </div>
-      <div class="stagger-4">${ratingsPanelHTML(match, ratings)}</div>
       <div class="select-actions stagger-5">
         <button class="btn back magnetic-btn" id="homeBtn">${icon('home', 16)} MAIN MENU</button>
         <button class="btn primary big magnetic-btn" id="rematchBtn">${icon('restart', 16)} REMATCH</button>
@@ -549,9 +566,27 @@ export class Screens {
     const fx = userFixture(career);
     const opponent = CLUBS[fx.home === career.clubId ? fx.away : fx.home];
     const atHome = fx.home === career.clubId;
+    const fin = career.finance || initFinance(myClub.rating);
+    const wages = wageBill(myClub.squad);
+    const projection = seasonProjection(fin, totalRounds(career) - career.week + 1, pos);
 
+    const news = (career.market?.news || []).slice(0, 4);
     el.innerHTML = `
-      <div class="screen-title">${icon('trophy', 26)} SEASON ${career.season} — MATCHDAY ${career.week}/${totalRounds(career)}</div>
+      <div class="career-hero stagger-1">
+        <div class="ch-club">
+          <canvas id="chBadge" width="54" height="54"></canvas>
+          <div>
+            <div class="ch-name">${myClub.name.toUpperCase()}</div>
+            <div class="ch-sub">SEASON ${career.season} · MATCHDAY ${career.week}/${totalRounds(career)} · DREAM LEAGUE</div>
+          </div>
+        </div>
+        <div class="ch-stats">
+          <div class="ch-stat"><b>${pos}${['st','nd','rd'][pos-1] || 'th'}</b><span>POSITION</span></div>
+          <div class="ch-stat"><b>${table.find(r => r.id === myClub.id)?.pts ?? 0}</b><span>POINTS</span></div>
+          <div class="ch-stat"><b style="color:${fin.balance < 0 ? '#e05263' : 'var(--accent)'};">${fmtCoins(fin.balance)}</b><span>BUDGET</span></div>
+          <div class="ch-stat"><b>${Math.round(myClub.squad.reduce((s, p) => s + p.overall, 0) / myClub.squad.length)}</b><span>SQUAD OVR</span></div>
+        </div>
+      </div>
 
       <div class="career-layout">
         <!-- Standings Table -->
@@ -614,10 +649,25 @@ export class Screens {
             <div class="career-dash-row"><span>Top scorer</span><b>${scorer.season.goals > 0 ? `${scorer.name.split(' ').pop()} (${scorer.season.goals})` : '—'}</b></div>
           </div>
 
+          <div class="panel spotlight-card stagger-3" style="padding: 14px 16px;">
+            <div class="section-tag">FINANCES</div>
+            <div class="career-dash-row"><span>Balance</span><b style="color:${fin.balance < 0 ? '#e05263' : 'var(--accent)'};">${fmtCoins(fin.balance)}</b></div>
+            <div class="career-dash-row"><span>Weekly wages</span><b>−${fmtCoins(wages)}</b></div>
+            <div class="career-dash-row"><span>Last matchday</span><b>${fin.lastIncome ? `+${fmtCoins(fin.lastIncome)}` : '—'}</b></div>
+            <div class="career-dash-row"><span>Season projection</span><b>${fmtCoins(projection)}</b></div>
+          </div>
+
+          ${news.length ? `
+          <div class="panel spotlight-card stagger-4" style="padding: 14px 16px;">
+            <div class="section-tag">CLUB NEWS</div>
+            ${news.map(n => `<div class="news-line">S${n.season} MD${n.week} — ${n.text}</div>`).join('')}
+          </div>` : ''}
+
           <div class="panel spotlight-card stagger-4" style="padding: 16px; display: flex; flex-direction: column; gap: 8px;">
             <button class="btn primary magnetic-btn" id="careerPlayBtn" style="width:100%; justify-content:center;">${icon('play', 18)} PLAY MATCH</button>
             <button class="btn magnetic-btn" id="careerSimBtn" style="width:100%; justify-content:center;">⏩ SIM FIXTURE</button>
             <button class="btn magnetic-btn" id="careerSquadBtn" style="width:100%; justify-content:center;">👥 SQUAD</button>
+            <button class="btn magnetic-btn" id="careerMarketBtn" style="width:100%; justify-content:center;">💱 TRANSFERS${windowOpen(career) ? ' <span style="color:var(--accent);">•OPEN</span>' : ''}</button>
             <button class="btn magnetic-btn" id="careerResetBtn" style="width:100%; justify-content:center; border-color:#e05263; color:#e05263;">RESET CAREER</button>
           </div>
         </div>
@@ -630,6 +680,7 @@ export class Screens {
 
     setTimeout(() => {
       el.querySelectorAll('.badge-mini').forEach(c => drawBadge(c, CLUBS[parseInt(c.dataset.club)]));
+      drawBadge(el.querySelector('#chBadge'), myClub);
       drawBadge(el.querySelector('#fixBadgeMe'), myClub);
       drawBadge(el.querySelector('#fixBadgeOpp'), opponent);
     }, 50);
@@ -653,6 +704,7 @@ export class Screens {
     };
 
     el.querySelector('#careerSquadBtn').onclick = () => this.squadModal(myClub);
+    el.querySelector('#careerMarketBtn').onclick = () => this.marketModal(career);
 
     el.querySelector('#careerResetBtn').onclick = () => {
       if (confirm('Are you sure you want to reset your career progress?')) {
@@ -685,19 +737,97 @@ export class Screens {
       </div>
       <div class="select-actions stagger-2">
         <button class="btn back magnetic-btn" id="ssMenuBtn">${icon('home', 16)} MAIN MENU</button>
+        <button class="btn magnetic-btn" id="ssMarketBtn">💱 TRANSFERS</button>
         <button class="btn primary big magnetic-btn" id="ssNextBtn">${icon('restart', 16)} START SEASON ${career.season + 1}</button>
       </div>`;
     setTimeout(() => drawBadge(el.querySelector('#champBadge'), champion), 50);
     el.querySelector('#ssMenuBtn').onclick = () => this.triggerWipe(() => this.menu());
+    el.querySelector('#ssMarketBtn').onclick = () => this.marketModal(career);
     el.querySelector('#ssNextBtn').onclick = () => {
-      const { next } = endSeason(career);
+      const { summary, next } = endSeason(career);
       this.save.career = next;
       localStorage.setItem('dreamkick.v2', JSON.stringify(this.save));
-      Toast.show(`Season ${next.season} begins!`, 'success');
+      if (summary.forcedSale) {
+        Toast.show(`CLUB NEWS: ${summary.forcedSale.player} sold for ${summary.forcedSale.fee} coins to balance the books. Youth prospect ${summary.forcedSale.youth} promoted.`, 'error');
+      }
+      Toast.show(`Season ${next.season} begins! Prize money: +${summary.prize} coins.`, 'success');
       this.triggerWipe(() => this.career());
     };
     this.show(el);
     this.setupInteractions(el);
+  }
+
+  /** V4 Phase B — transfer market modal (buy / sell / news). */
+  marketModal(career) {
+    const m = ensureMarket(career);
+    const open = windowOpen(career);
+    const me = CLUBS[career.clubId];
+    const nw = nextWindowWeek(career);
+    const persist = () => localStorage.setItem('dreamkick.v2', JSON.stringify(this.save));
+
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop in';
+    modal.style.zIndex = '9001';
+    modal.innerHTML = `
+      <div class="modal-panel" style="max-width: 520px; max-height: 88vh; display:flex; flex-direction:column;">
+        <div class="modal-header"><h2>TRANSFER MARKET</h2><button class="modal-close">&times;</button></div>
+        <div class="modal-content" id="mktBody" style="overflow-y:auto;"></div>
+        <div class="modal-actions"><button class="btn primary modal-ok">CLOSE</button></div>
+      </div>`;
+    document.body.appendChild(modal);
+    const body = modal.querySelector('#mktBody');
+
+    const render = () => {
+      const balance = career.finance?.balance ?? 0;
+      body.innerHTML = `
+        <div class="career-dash-row"><span>Window</span><b style="color:${open ? 'var(--accent)' : '#e05263'};">${open ? 'OPEN' : `CLOSED — opens ${nw ? 'matchday ' + nw : 'end of season'}`}</b></div>
+        <div class="career-dash-row"><span>Balance</span><b>${fmtCoins(balance)}</b></div>
+        <div class="section-tag" style="margin-top:12px;">LISTINGS</div>
+        <div id="mktListings" style="display:flex; flex-direction:column; gap:6px;">
+          ${m.listings.map((l, i) => {
+            const p = listingPlayer(l);
+            if (!p) return '';
+            return `<div class="career-dash-row"><span>${p.pos} · ${p.name} (${p.overall}) <i class="dim">${CLUBS[l.club].code}, ${p.age}y</i></span>
+              <b>${fmtCoins(l.price)} <button class="btn" data-buy="${i}" style="padding:2px 10px; margin-left:6px;" ${!open || balance < l.price || me.squad.length >= MAX_SQUAD ? 'disabled' : ''}>BUY</button></b></div>`;
+          }).join('') || '<div class="dim">No listings.</div>'}
+        </div>
+        <div class="section-tag" style="margin-top:12px;">SELL (resolves next matchday)</div>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          ${[...me.squad].sort((a, b) => b.overall - a.overall).map(p => {
+            const listed = m.myListings.find(l => l.playerId === p.id);
+            return `<div class="career-dash-row"><span>${p.pos} · ${p.name} (${p.overall})</span>
+              <b>${listed ? `ask ${fmtCoins(listed.ask)} <button class="btn" data-unlist="${p.id}" style="padding:2px 10px;">✕</button>`
+                : `<button class="btn" data-sell="${p.id}" style="padding:2px 10px;">LIST ~${fmtCoins(suggestedFee(p))}</button>`}</b></div>`;
+          }).join('')}
+        </div>
+        <div class="section-tag" style="margin-top:12px;">TRANSFER NEWS</div>
+        ${m.news.map(n => `<div class="dim" style="font-size:12px; padding:2px 0;">S${n.season} MD${n.week}: ${n.text}</div>`).join('') || '<div class="dim">Quiet so far.</div>'}
+      `;
+      body.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => {
+        const err = buyPlayer(career, m.listings[parseInt(b.dataset.buy)]);
+        if (err) Toast.show(err, 'error');
+        else { Toast.show('Player signed!', 'success'); persist(); }
+        render();
+      });
+      body.querySelectorAll('[data-sell]').forEach(b => b.onclick = () => {
+        const p = me.squad.find(x => x.id === b.dataset.sell);
+        const ask = parseInt(prompt(`Asking price for ${p.name}? (value ~${suggestedFee(p)})`, suggestedFee(p)) || '0');
+        if (!ask) return;
+        const err = listForSale(career, p.id, ask);
+        if (err) Toast.show(err, 'error'); else persist();
+        render();
+      });
+      body.querySelectorAll('[data-unlist]').forEach(b => b.onclick = () => {
+        unlist(career, b.dataset.unlist); persist(); render();
+      });
+    };
+    render();
+    persist(); // ensureMarket may have generated a window
+
+    const close = () => modal.remove();
+    modal.querySelector('.modal-close').onclick = close;
+    modal.querySelector('.modal-ok').onclick = close;
+    modal.onclick = e => { if (e.target === modal) close(); };
   }
 
   /** Squad list modal — dossier on double-tap (career dashboard). */

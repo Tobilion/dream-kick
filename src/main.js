@@ -19,6 +19,7 @@ import { showTeamManagementModal } from './ui/teamManagement.js';
 import { showSettingsModal } from './ui/settingsScreen.js';
 import { showHalfTimeMenu, showMatchStatsModal } from './ui/matchFlow.js';
 import { migrateCareer, applyCareerToClubs, userFixture, completeRound, syncSeasonStats } from './core/career.js';
+import { ReplayRecorder, ReplayPlayer } from './render/replay.js';
 
 const canvas = document.getElementById('gameCanvas');
 const uiRoot = document.getElementById('ui');
@@ -60,6 +61,17 @@ let meshes = [];
 let ballMesh = null;
 let hud = null;
 let paused = false;
+let replayRec = null;
+let replayPlayer = null;
+
+/** Play the last ~8s in slow-mo. `onDone` runs after entity state is restored. */
+function startReplay(onDone) {
+  if (!replayRec || replayRec.length < 60) { hud.ticker('Nothing to replay yet.'); onDone?.(); return false; }
+  replayPlayer = new ReplayPlayer(replayRec, () => { replayPlayer = null; onDone?.(); });
+  if (!replayPlayer.start()) { replayPlayer = null; onDone?.(); return false; }
+  hud.phaseBanner('INSTANT REPLAY');
+  return true;
+}
 
 /** Camera preset order for in-game cycling */
 function cycleCamera() {
@@ -86,7 +98,10 @@ hud = new Hud(hudRoot, {
     } else if (act === 'stats') {
       showMatchStatsModal(match);
     } else if (act === 'replay') {
-      hud.ticker('Instant Replay — coming soon.');
+      // hide the pause overlay (UI only — match stays PAUSED), replay, then re-show
+      hud.setPaused(false);
+      const ok = startReplay(() => { if (paused) hud.setPaused(true); });
+      if (!ok) hud.setPaused(true);
     } else if (act === 'settings') {
       showSettingsModal(save, match, cam, () => {});
     } else if (act === 'simEnd') {
@@ -166,6 +181,7 @@ fsm.register('MATCH', {
               onTeamMgmt: () => showTeamManagementModal(match, 0, () => {}),
               onSettings: () => showSettingsModal(save, match, cam, () => {}),
               onToast: msg => hud.ticker(msg),
+              onReplay: done => startReplay(done),
               onSimEnd: () => match.simToEnd(),
               onForfeit: () => match.forfeit(),
               onContinue: () => match.resumeFromHalfTime(),
@@ -189,6 +205,8 @@ fsm.register('MATCH', {
     });
     match._opts = opts;
     window.__match = match; // debug/testing handle
+    replayRec = new ReplayRecorder(match);
+    replayPlayer = null;
 
     // Build 3D player meshes and wire back-reference for subs
     for (const team of match.teams) {
@@ -221,9 +239,13 @@ fsm.register('MATCH', {
 
   update(dt) {
     input.update();
+    if (replayPlayer?.playing) return;      // freeze input/sim during replay
     if (input.state.pausePressed) setPaused(!paused);
     if (input.state.cycleCamPressed) cycleCamera();
     match.update(dt, input.state);
+    if (!paused && match.state !== MATCH_STATE.HALF_TIME && match.state !== MATCH_STATE.FULL_TIME) {
+      replayRec?.capture();
+    }
   },
 
   exit() {
@@ -314,6 +336,7 @@ function frame(now) {
   sceneMgr.probeQuality(dt);
 
   if (fsm.is('MATCH') && match) {
+    replayPlayer?.step(dt);
     for (const m of meshes) m.update(dt);
     if (ballMesh) ballMesh.update(dt);
     if (ringMesh && match.controlled) {

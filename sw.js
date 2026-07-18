@@ -1,5 +1,5 @@
 /* sw.js — offline cache for Dream Kick v2 */
-const CACHE = 'dreamkick-v2.8.0'; // bumped: V3 Phase D career mode
+const CACHE = 'dreamkick-v2.11.0'; // bumped: replay, results layout, career hero, sim hardening
 const ASSETS = [
   './',
   './index.html',
@@ -13,6 +13,9 @@ const ASSETS = [
   './src/core/state.js',
   './src/core/save.js',
   './src/core/career.js',
+  './src/core/finance.js',
+  './src/core/transfers.js',
+  './src/render/replay.js',
   './src/data/names.js',
   './src/data/teams.js',
   './src/engine/ball.js',

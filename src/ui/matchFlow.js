@@ -110,7 +110,13 @@ export function showHalfTimeMenu(match, h) {
       if (act === 'teamMgmt') h.onTeamMgmt();                 // modal stacks above; menu stays
       else if (act === 'stats') showMatchStatsModal(match);
       else if (act === 'settings') h.onSettings();
-      else if (act === 'replay') h.onToast?.('Instant Replay — coming soon.');
+      else if (act === 'replay') {
+        if (h.onReplay) {
+          overlay.style.visibility = 'hidden';
+          const ok = h.onReplay(() => { overlay.style.visibility = ''; });
+          if (ok === false) overlay.style.visibility = '';
+        } else h.onToast?.('Instant Replay — coming soon.');
+      }
       else if (act === 'simEnd') {
         if (confirm('Simulate the rest of the match?')) { closeMenu(); h.onSimEnd(); }
       } else if (act === 'forfeit') {
