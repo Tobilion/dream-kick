@@ -12,6 +12,7 @@
 import { CONFIG } from '../core/config.js';
 import { dist2, norm2, clamp } from '../core/math.js';
 import { PSTATE } from './player.js';
+import { getMoraleMultiplier } from '../data/teams.js';
 
 const P = CONFIG.PLAYER;
 const B = CONFIG.BALL;
@@ -52,7 +53,8 @@ export class PossessionSystem {
     const incoming = b.speed;
     if (incoming > 7 && nearest.firstTouchT <= 0) {
       const control = 1.3 - ((nearest.data.dribble ?? 65) / 100) * 0.6;
-      nearest.firstTouchT = P.FIRST_TOUCH_TIME * clamp(incoming / 14, 0.7, 1.6) * control;
+      const moraleMult = getMoraleMultiplier(nearest.data);
+      nearest.firstTouchT = P.FIRST_TOUCH_TIME * clamp(incoming / 14, 0.7, 1.6) * control * moraleMult;
       const dir = norm2(b.vel.x, b.vel.z);
       b.vel.x = dir.x * 1.6; b.vel.z = dir.z * 1.6; b.vel.y = 0;
       b.spin = 0;

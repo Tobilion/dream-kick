@@ -8,6 +8,7 @@
 import { CONFIG } from '../core/config.js';
 import { clamp, norm2 } from '../core/math.js';
 import { PassingSystem } from './passingSystem.js';
+import { getMoraleMultiplier } from '../data/teams.js';
 
 const P = CONFIG.PLAYER;
 const PITCH = CONFIG.PITCH;
@@ -29,12 +30,14 @@ export class ShootingSystem {
     const pressure = PassingSystem.pressure(match, pl);
     const skill = pl.data.shoot / 100;
 
+    const moraleMult = getMoraleMultiplier(pl.data);
     const err =
       (1.05 - skill) *
       (0.5 + charge * 0.7) *                  // harder shots stray more
       (0.6 + clamp(dGoal / 24, 0, 1.4)) *      // distance
       (1 + angleOff * 0.9) *                   // tight angles
-      (1 + pressure * 1.1);                    // bodies closing in
+      (1 + pressure * 1.1) *                   // bodies closing in
+      moraleMult;
 
     // aim inside the posts, biased by input
     const target = clamp(aimZ, -1, 1) * (PITCH.GOAL_WIDTH / 2 - 0.5);

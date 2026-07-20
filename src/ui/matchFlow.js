@@ -88,14 +88,14 @@ export function showHalfTimeMenu(match, h) {
         <div class="htmenu-team"><canvas id="htmBadgeA" width="52" height="52"></canvas><span>${ac.code}</span></div>
       </div>
       <div class="htmenu-grid">
-        <button data-act="teamMgmt">👥 TEAM MANAGEMENT</button>
-        <button data-act="stats">📊 MATCH STATISTICS</button>
-        <button data-act="settings">⚙️ GAME SETTINGS</button>
-        <button data-act="replay">🎬 INSTANT REPLAY</button>
-        <button data-act="simEnd">⏩ SIM TO END</button>
-        <button data-act="forfeit" class="danger">🏳️ FORFEIT</button>
+        <button data-act="teamMgmt">${icon('users', 16)} TEAM MANAGEMENT</button>
+        <button data-act="stats">${icon('chart', 16)} MATCH STATISTICS</button>
+        <button data-act="settings">${icon('gear', 16)} GAME SETTINGS</button>
+        <button data-act="replay">${icon('film', 16)} INSTANT REPLAY</button>
+        <button data-act="simEnd">${icon('ff', 16)} SIM TO END</button>
+        <button data-act="forfeit" class="danger">${icon('flag', 16)} FORFEIT</button>
       </div>
-      <button class="btn primary big htmenu-continue" data-act="continue">▶ CONTINUE TO 2ND HALF</button>
+      <button class="btn primary big htmenu-continue" data-act="continue">${icon('play', 16)} CONTINUE TO 2ND HALF</button>
     </div>`;
   document.body.appendChild(overlay);
   drawBadge(overlay.querySelector('#htmBadgeH'), hc);

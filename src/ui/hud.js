@@ -37,14 +37,14 @@ export class Hud {
       <div id="pauseOverlay">
         <div class="pause-panel">
           <div class="pause-title">PAUSED</div>
-          <button data-act="resume">▶  RESUME</button>
-          <button data-act="teamMgmt">👥  TEAM MANAGEMENT</button>
-          <button data-act="stats">📊  MATCH STATISTICS</button>
-          <button data-act="settings">⚙️  GAME SETTINGS</button>
-          <button data-act="replay">🎬  INSTANT REPLAY</button>
-          <button data-act="simEnd">⏩  SIM TO END</button>
-          <button data-act="forfeit">🏳️  FORFEIT MATCH</button>
-          <button data-act="quit">✕  EXIT TO MENU</button>
+          <button data-act="resume">${icon('play', 16)} RESUME</button>
+          <button data-act="teamMgmt">${icon('users', 16)} TEAM MANAGEMENT</button>
+          <button data-act="stats">${icon('chart', 16)} MATCH STATISTICS</button>
+          <button data-act="settings">${icon('gear', 16)} GAME SETTINGS</button>
+          <button data-act="replay">${icon('film', 16)} INSTANT REPLAY</button>
+          <button data-act="simEnd">${icon('ff', 16)} SIM TO END</button>
+          <button data-act="forfeit">${icon('flag', 16)} FORFEIT MATCH</button>
+          <button data-act="quit">${icon('exit', 16)} EXIT TO MENU</button>
         </div>
       </div>`;
     root.appendChild(this.el);

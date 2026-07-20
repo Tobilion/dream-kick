@@ -16,15 +16,13 @@ const DEV_KEYS = ['pace', 'shoot', 'pass', 'dribble', 'defend', 'physical'];
 
 /* ---------------- window cadence ---------------- */
 
-/** Open between seasons and every 5th matchday (weeks 5, 10, 15). */
+/** Transfer window is always open — buy or sell any matchday. */
 export function windowOpen(career) {
-  return career.week > career.rounds.length || career.week % 5 === 0;
+  return true;
 }
 
 export function nextWindowWeek(career) {
-  if (windowOpen(career)) return career.week;
-  const w = Math.ceil(career.week / 5) * 5;
-  return w <= career.rounds.length ? w : null; // null ⇒ next window is end of season
+  return career.week; // always open
 }
 
 function windowKey(career) {

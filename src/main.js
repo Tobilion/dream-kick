@@ -18,8 +18,10 @@ import { LineupIntro } from './ui/lineupIntro.js';
 import { showTeamManagementModal } from './ui/teamManagement.js';
 import { showSettingsModal } from './ui/settingsScreen.js';
 import { showHalfTimeMenu, showMatchStatsModal } from './ui/matchFlow.js';
-import { migrateCareer, applyCareerToClubs, userFixture, completeRound, syncSeasonStats } from './core/career.js';
+import { migrateCareer, applyCareerToClubs, userFixture, completeRound, syncSeasonStats, attributeCupTieStats } from './core/career.js';
+import { playCupRound } from './core/cup.js';
 import { ReplayRecorder, ReplayPlayer } from './render/replay.js';
+import { settingsPage } from './ui/pages/settingsPage.js';
 
 const canvas = document.getElementById('gameCanvas');
 const uiRoot = document.getElementById('ui');
@@ -85,7 +87,8 @@ function cycleCamera() {
 const screens = new Screens(uiRoot, save, {
   startMatch: opts => fsm.go('MATCH', opts),
   toMenu: () => fsm.go('MENU'),
-  openSettings: () => showSettingsModal(save, null, cam),
+  // home hub → full settings PAGE (V5 U4); the pause menu keeps the modal
+  openSettings: () => screens.triggerWipe(() => settingsPage(screens, cam)),
 });
 
 hud = new Hud(hudRoot, {
@@ -288,7 +291,21 @@ function updateCareerStandings() {
   const iAmHome = fx.home === career.clubId;
   // in a career match the user club is always match.teams[0]
   const mine = match.score[0], theirs = match.score[1];
-  completeRound(career, iAmHome ? { hs: mine, as: theirs } : { hs: theirs, as: mine });
+  const result = iAmHome ? { hs: mine, as: theirs } : { hs: theirs, as: mine };
+  if (fx.cup) {
+    // V4 Phase C: cup matchday — a draw resolves via seeded shootout after FT
+    const res = playCupRound(career, result, (t, isManual) => attributeCupTieStats(career, t, isManual));
+    const t = res?.userTie;
+    if (t) {
+      const won = (t.hs !== t.as ? (t.hs > t.as) === iAmHome : (t.pen[0] > t.pen[1]) === iAmHome);
+      const pens = t.pen ? ` ${iAmHome ? `${t.pen[0]}–${t.pen[1]}` : `${t.pen[1]}–${t.pen[0]}`} on penalties` : '';
+      match._cupNote = won
+        ? (res.finished ? `DREAM CUP WINNERS!${pens}` : `Through to the next round${pens ? ' —' + pens : ''}.`)
+        : `Out of the cup${pens ? ' —' + pens : ''}.`;
+    }
+  } else {
+    completeRound(career, result);
+  }
   syncSeasonStats(career);
   writeSave(save);
 }

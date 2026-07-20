@@ -21,6 +21,25 @@ export function computeMatchRatings(match) {
     const cleanSheet = match.score[1 - team.index] === 0;
     for (const p of team.players) {
       const s = p.matchStats;
+      let formNudge = 0;
+      if (match._opts?.isCareer && match._opts.trainingFocus && team.index === 0) {
+        const focus = match._opts.trainingFocus;
+        const coaches = match._opts.coaches || {};
+        let matchesFocus = false;
+        if (focus === 'Attack' && (p.data.pos === 'FW' || p.data.pos === 'MF')) {
+          matchesFocus = true;
+        } else if (focus === 'Defense' && (p.data.pos === 'DF' || p.isGK)) {
+          matchesFocus = true;
+        } else if (focus === 'Fitness') {
+          matchesFocus = true;
+        } else if (focus === 'Youth' && p.data.age < 22) {
+          matchesFocus = true;
+        }
+        if (matchesFocus) {
+          const coachActive = coaches[focus] || (focus === 'Defense' && coaches.Defending) || (focus === 'Attack' && coaches.Attacking);
+          formNudge = coachActive ? 0.25 : 0.15;
+        }
+      }
       let r = 6.0
         + tdiff * 0.2
         + s.goals * 1.2
@@ -29,7 +48,8 @@ export function computeMatchRatings(match) {
         + s.tackles * 0.15
         + s.saves * 0.35
         + (p.data.overall - 78) / 40
-        + (match.rng() - 0.5) * 0.5;
+        + (match.rng() - 0.5) * 0.5
+        + formNudge;
       if (p.isGK && cleanSheet) r += 0.7;
       if ((p.data.pos === 'DF' || p.isGK) && cleanSheet) r += 0.3;
       ratings.set(p, Math.round(clamp(r, 4.5, 10) * 10) / 10);

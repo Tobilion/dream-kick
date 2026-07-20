@@ -14,23 +14,23 @@ import {
   Toast
 } from './components.js';
 import { computeMatchRatings, ratingsPanelHTML } from './matchFlow.js';
-import { renderPlayerCard, showPlayerInfoPopup } from './playerCard.js';
 import {
   CAREER_VERSION, newCareer, seasonOver, userFixture, leagueTable, leaguePosition,
   teamFormLetters, topScorer, totalRounds, completeRound, syncSeasonStats, endSeason,
+  divisionOf, leagueLeaderboards, goldenBoot, applyCareerToClubs,
 } from '../core/career.js';
 import { initFinance, wageBill, seasonProjection } from '../core/finance.js';
-import {
-  ensureMarket, windowOpen, nextWindowWeek, listingPlayer, buyPlayer,
-  listForSale, unlist, suggestedFee, MAX_SQUAD,
-} from '../core/transfers.js';
+import { hubTile, hubGrid, fmtCoins } from './hub.js';
+import { fixturesPage, tablePage, financesPage, cupPage } from './pages/careerPages.js';
+import { ensureCup, cupFinished, userCupLabel, playCupRound, CUP_ROUND_NAMES, CUP_WEEKS } from '../core/cup.js';
+import { marketPage, squadPage } from './pages/clubPages.js';
+import { trainingPage } from './pages/trainingPages.js';
+import { leaderboardPage } from './pages/leaderboards.js';
+import { howToPlayPage } from './pages/howToPlay.js';
+import { boardPage } from './pages/boardPage.js';
+import { windowOpen, nextWindowWeek } from '../core/transfers.js';
+import { getConfidenceLabel, getConfidenceColor, ensureBoardState } from '../core/board.js';
 
-/** 12500 → "12.5k", -300 → "-300" (coins). */
-function fmtCoins(n) {
-  const a = Math.abs(n);
-  const s = a >= 10000 ? `${Math.round(n / 100) / 10}k` : `${n}`;
-  return s;
-}
 
 let audioCtx = null;
 
@@ -58,7 +58,7 @@ function playSelectSound() {
   setTimeout(() => playChime(783.99, 'triangle', 0.3, 0.04), 60);
 }
 
-const TIPS = [
+export const TIPS = [
   "TIP: Hold PASS button for a lofted long ball/cross.",
   "TIP: Hold SPRINT (Shift) to run faster, but watch your player's stamina!",
   "TIP: Switch players early using Q to position your defenders.",
@@ -120,43 +120,57 @@ export class Screens {
     });
   }
 
-  /* ---------------- main menu ---------------- */
+  /* ---------------- main menu: V5 U1 home hub ---------------- */
   menu() {
     const el = document.createElement('div');
-    el.className = 'screen menu-screen';
+    el.className = 'screen menu-screen hub-screen';
     const last = this.save.results[0];
-    
+    const career = this.save.career;
+    const hasCareer = career && career.clubId !== null && career.version;
+    const club = hasCareer ? CLUBS[career.clubId] : null;
+    const marketOpen = hasCareer && !!career.rounds && windowOpen(career);
+    const headline = career?.market?.news?.[0]?.text;
+
     el.innerHTML = `
       <div class="menu-head">
         <div class="brand">${icon('ball', 34)}<span id="scrambleBrand">DREAM<b>KICK</b></span></div>
         <div class="brand-sub">FOOTBALL ${new Date().getFullYear()}</div>
       </div>
-      <div class="tile-row">
-        <button class="tile primary spotlight-card tilt-card" data-act="play">
-          <div class="tile-icon">${icon('play', 40)}</div>
-          <div class="tile-title">KICK OFF</div>
-          <div class="tile-sub">Quick match · 11v11</div>
-        </button>
-        <button class="tile spotlight-card tilt-card" data-act="career">
-          <div class="tile-icon">${icon('trophy', 40)}</div>
-          <div class="tile-title">CLASSIC CAREER</div>
-          <div class="tile-sub">Lead your club to glory</div>
-        </button>
-        <button class="tile spotlight-card tilt-card" data-act="how">
-          <div class="tile-icon">${icon('whistle', 40)}</div>
-          <div class="tile-title">HOW TO PLAY</div>
-          <div class="tile-sub">Controls & tips</div>
-        </button>
-      </div>
-      ${last ? `<div class="last-result">LAST MATCH&ensp;<b>${last.home}</b> ${last.hs} – ${last.as} <b>${last.away}</b></div>` : ''}
-      
+      <div id="homeHub"></div>
       <button class="music-toggle-btn" id="soundBtn" title="Toggle Sound">
-        ${icon(this.save.sound ? 'gear' : 'restart', 20)}
+        ${icon(this.save.sound ? 'sound' : 'soundOff', 20)}
         <span style="font-size: 11px; font-weight:700; margin-left: 6px;">SOUND: ${this.save.sound ? 'ON' : 'OFF'}</span>
       </button>
-
       <div class="menu-foot" id="menuTicker">TIP: Hold SPRINT (Shift) to run faster!</div>`;
-    
+
+    const careerLive = hasCareer && club
+      ? `<b>${club.name}</b> · S${career.season || 1}${career.rounds ? ` · MD ${Math.min(career.week, career.rounds.length)}/${career.rounds.length}` : ''}
+         ${career.rounds ? `<span class="form-chips" style="margin-left:8px;">${teamFormLetters(career).map(f => `<i class="fc-${f}">${f}</i>`).join('')}</span>` : ''}`
+      : 'Start your journey';
+    const tiles = [
+      hubTile({ icon: 'play', title: 'KICK OFF', sub: 'Quick match · 11v11', size: 'hero', accent: true,
+        liveHTML: last ? `LAST&ensp;<b>${last.home}</b> ${last.hs}–${last.as} <b>${last.away}</b>` : '',
+        onOpen: () => this.triggerWipe(() => this.teamSelect()) }),
+      hubTile({ icon: 'trophy', title: 'CAREER', sub: 'Lead your club to glory', size: 'wide',
+        liveHTML: careerLive, onOpen: () => this.triggerWipe(() => this.career()) }),
+      hubTile({ icon: 'swap', title: 'TRANSFERS', sub: hasCareer ? 'Market & listings' : 'Needs a career',
+        badge: marketOpen ? 'OPEN' : '', onOpen: () => {
+          if (!hasCareer || !career.rounds) { Toast.show('Start a career first.', 'info'); return; }
+          this.triggerWipe(() => marketPage(this, career));
+        } }),
+      hubTile({ icon: 'news', title: 'CLUB NEWS', sub: headline ? '' : 'No headlines yet',
+        liveHTML: headline ? `<span class="dim">${headline}</span>` : '',
+        onOpen: () => {
+          if (!hasCareer || !career.rounds) { Toast.show('Start a career first.', 'info'); return; }
+          this.triggerWipe(() => marketPage(this, career));
+        } }),
+      hubTile({ icon: 'question', title: 'HOW TO PLAY', sub: 'Controls & tips',
+        onOpen: () => this.triggerWipe(() => howToPlayPage(this)) }),
+      hubTile({ icon: 'gear', title: 'SETTINGS', sub: 'Camera · difficulty · sound',
+        onOpen: () => this.actions.openSettings() }),
+    ];
+    el.querySelector('#homeHub').replaceWith(hubGrid(tiles));
+
     // Brand scramble animation
     setTimeout(() => {
       const brandSpan = el.querySelector('#scrambleBrand');
@@ -179,16 +193,12 @@ export class Screens {
       }, 300);
     }, 6000);
 
-    el.querySelector('[data-act=play]').onclick = () => this.triggerWipe(() => this.teamSelect());
-    el.querySelector('[data-act=how]').onclick = () => this.triggerWipe(() => this.howTo());
-    el.querySelector('[data-act=career]').onclick = () => this.triggerWipe(() => this.career());
-    
     const soundBtn = el.querySelector('#soundBtn');
     soundBtn.onclick = () => {
       this.save.sound = !this.save.sound;
       window.__soundDisabled = !this.save.sound;
       soundBtn.innerHTML = `
-        ${icon(this.save.sound ? 'gear' : 'restart', 20)}
+        ${icon(this.save.sound ? 'sound' : 'soundOff', 20)}
         <span style="font-size: 11px; font-weight:700; margin-left: 6px;">SOUND: ${this.save.sound ? 'ON' : 'OFF'}</span>
       `;
       localStorage.setItem('dreamkick.v2', JSON.stringify(this.save));
@@ -200,29 +210,7 @@ export class Screens {
     this.setupInteractions(el);
   }
 
-  /* ---------------- how to play ---------------- */
-  howTo() {
-    const el = document.createElement('div');
-    el.className = 'screen how-screen';
-    el.innerHTML = `
-      <div class="screen-title">${icon('whistle', 26)} HOW TO PLAY</div>
-      <div class="panel spotlight-card">
-        <div class="how-grid">
-          <div><span class="key">W A S D</span> / <span class="key">Arrows</span></div><div>Move player</div>
-          <div><span class="key">X</span> / <span class="key">Space</span></div><div>Pass · hold for long ball · tackle in defence</div>
-          <div><span class="key">C</span> / <span class="key">Z</span></div><div>Shoot — hold to charge power</div>
-          <div><span class="key">Shift</span></div><div>Sprint (drains stamina)</div>
-          <div><span class="key">Q</span></div><div>Switch player</div>
-          <div><span class="key">Esc</span> / <span class="key">P</span></div><div>Pause</div>
-        </div>
-        <p class="dim" style="margin-top: 18px;">On mobile: left thumb virtual joystick to move, right-side buttons for PASS / SHOOT / SPRINT / SW.</p>
-        <p class="dim">Your controlled player has a ring under him and a name plate. The radar at the bottom shows everyone.</p>
-      </div>
-      <button class="btn back magnetic-btn">${icon('arrowL', 16)} BACK</button>`;
-    el.querySelector('.back').onclick = () => this.triggerWipe(() => this.menu());
-    this.show(el);
-    this.setupInteractions(el);
-  }
+  /* how to play: promoted to ui/pages/howToPlay.js (V5 U4) */
 
   /* ---------------- team select ---------------- */
   teamSelect() {
@@ -439,6 +427,7 @@ export class Screens {
         <div class="sh-team"><canvas width="90" height="90" id="rbA"></canvas><span>${a.name}</span></div>
       </div>
       <div class="scorers-row stagger-2"><div>${scorerList(0)}</div><div>${scorerList(1)}</div></div>
+      ${match._cupNote ? `<div class="stagger-2" style="text-align:center; font-weight:800; color:var(--accent); letter-spacing:0.06em;">${icon('trophy', 14)} DREAM CUP — ${match._cupNote}</div>` : ''}
       <div class="results-grid stagger-3">
         <div class="panel stats-panel spotlight-card" style="max-width:none;">
           <div class="section-tag" style="margin-bottom:8px;">MATCH STATS</div>
@@ -509,17 +498,25 @@ export class Screens {
 
   career() {
     const el = document.createElement('div');
-    el.className = 'screen career-screen';
+    el.className = 'screen career-screen hub-screen';
     
     // 1. Choose club phase if not set
     if (this.save.career.clubId === null) {
+      const isSacked = this.save.career.sackedRestart;
+      const sortedClubs = [...CLUBS].sort((a, b) => b.rating - a.rating);
+      const bottom10 = sortedClubs.slice(10);
+      const listClubs = isSacked ? bottom10 : CLUBS;
+
       el.innerHTML = `
-        <div class="screen-title">${icon('trophy', 26)} CAREER MODE — CHOOSE YOUR CLUB</div>
+        <div class="screen-title">${icon('trophy', 26)} ${isSacked ? 'RESTART CAREER — SELECT NEW CLUB' : 'CAREER MODE — CHOOSE YOUR CLUB'}</div>
         <div style="font-size: 14px; color: var(--muted); text-align: center; max-width: 500px;" class="stagger-1">
-          Select a club to lead through the divisions. Perform well to earn points and stay at the top.
+          ${isSacked 
+            ? 'Following your dismissal, you must rebuild your manager reputation. Sign with a bottom-half club to restart.' 
+            : 'Select a club to lead through the divisions. Perform well to earn points and stay at the top.'
+          }
         </div>
         <div class="tile-row stagger-2" style="max-height: 50vh; overflow-y: auto; max-width: 800px; justify-content: center;">
-          ${CLUBS.map(c => `
+          ${listClubs.map(c => `
             <button class="tile spotlight-card tilt-card select-club-tile" data-club="${c.id}" style="padding: 16px; width: 170px;">
               <canvas class="badge-canvas" width="60" height="60" style="display: block; margin: 0 auto 10px;"></canvas>
               <div class="team-name" style="font-size: 13px;">${c.name}</div>
@@ -539,7 +536,14 @@ export class Screens {
           const canvas = tile.querySelector('.badge-canvas');
           drawBadge(canvas, CLUBS[clubId]);
           tile.onclick = () => {
-            this.save.career = newCareer(clubId);
+            const history = this.save.career.history || [];
+            const season = this.save.career.season || 1;
+            
+            // Build new career, preserving season and history
+            this.save.career = newCareer(clubId, season, history);
+            this.save.career.sackedRestart = false;
+            
+            applyCareerToClubs(this.save.career);
             localStorage.setItem('dreamkick.v2', JSON.stringify(this.save));
             Toast.show(`Signed contract with ${CLUBS[clubId].name}!`, 'success');
             this.triggerWipe(() => this.career());
@@ -553,12 +557,37 @@ export class Screens {
       return;
     }
 
+
     // 2. Season over → summary + roll into next season
     const career = this.save.career;
     if (seasonOver(career)) { this.seasonSummary(el, career); return; }
 
     // 3. Main career dashboard
     const myClub = CLUBS[career.clubId];
+    ensureBoardState(career);
+
+    // L3: Show board confidence change toast
+    if (career.board && career.board.lastDelta !== undefined && career.board.lastDelta !== 0) {
+      const delta = career.board.lastDelta;
+      career.board.lastDelta = 0;
+      const label = getConfidenceLabel(career.board.confidence);
+      const isPositive = delta > 0;
+      const type = isPositive ? 'success' : 'error';
+      const arrow = isPositive ? '▲' : '▼';
+      Toast.show(`Board Confidence: ${career.board.confidence}% (${isPositive ? '+' : ''}${delta}% ${arrow} — ${label})`, type, 3500);
+    }
+
+    // L2: Fire unsettled Toast for any user-squad player whose morale just dipped below 35
+    for (const p of myClub.squad) {
+      if ((p.morale ?? 70) < 35 && !p._moraleAlertShown) {
+        p._moraleAlertShown = true;
+        Toast.show(`UNSETTLED: ${p.name} is unhappy (Morale: ${p.morale})`, 'error', 4000);
+      } else if ((p.morale ?? 70) >= 35) {
+        p._moraleAlertShown = false;
+      }
+    }
+
+
     const table = leagueTable(career);
     const pos = leaguePosition(career);
     const form = teamFormLetters(career);
@@ -570,6 +599,7 @@ export class Screens {
     const wages = wageBill(myClub.squad);
     const projection = seasonProjection(fin, totalRounds(career) - career.week + 1, pos);
 
+
     const news = (career.market?.news || []).slice(0, 4);
     el.innerHTML = `
       <div class="career-hero stagger-1">
@@ -577,7 +607,7 @@ export class Screens {
           <canvas id="chBadge" width="54" height="54"></canvas>
           <div>
             <div class="ch-name">${myClub.name.toUpperCase()}</div>
-            <div class="ch-sub">SEASON ${career.season} · MATCHDAY ${career.week}/${totalRounds(career)} · DREAM LEAGUE</div>
+            <div class="ch-sub">SEASON ${career.season} · MATCHDAY ${career.week}/${totalRounds(career)} · DIVISION ${career.division || divisionOf(career)}</div>
           </div>
         </div>
         <div class="ch-stats">
@@ -588,132 +618,109 @@ export class Screens {
         </div>
       </div>
 
-      <div class="career-layout">
-        <!-- Standings Table -->
-        <div class="panel career-table-panel spotlight-card stagger-1" style="max-height: 480px; overflow-y: auto;">
-          <div class="section-tag">LEAGUE STANDINGS</div>
-          <table class="career-table">
-            <thead>
-              <tr>
-                <th>#</th><th>CLUB</th>
-                <th style="text-align:center;">PLD</th>
-                <th style="text-align:center;">W</th>
-                <th style="text-align:center;">D</th>
-                <th style="text-align:center;">L</th>
-                <th style="text-align:center;">GD</th>
-                <th style="text-align:center; color: var(--accent);">PTS</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${table.map((st, idx) => {
-                const club = CLUBS[st.id];
-                const isMe = club.id === myClub.id;
-                return `
-                  <tr class="${isMe ? 'my-club' : ''} stagger-${Math.min(5, Math.floor(idx / 3) + 1)}">
-                    <td>${idx + 1}</td>
-                    <td><canvas class="badge-mini" width="22" height="22" data-club="${club.id}"></canvas>${club.name}</td>
-                    <td style="text-align:center;">${st.pld}</td>
-                    <td style="text-align:center;">${st.w}</td>
-                    <td style="text-align:center;">${st.d}</td>
-                    <td style="text-align:center;">${st.l}</td>
-                    <td style="text-align:center;">${st.gd > 0 ? '+' : ''}${st.gd}</td>
-                    <td style="text-align:center; font-weight:800;">${st.pts}</td>
-                  </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
+      <div id="careerHub"></div>
 
-        <!-- Side Panel -->
-        <div class="career-side-panel">
-          <div class="panel spotlight-card stagger-2" style="padding: 16px;">
-            <div class="section-tag">NEXT MATCH ${atHome ? '(HOME)' : '(AWAY)'}</div>
-            <div class="fixture-snap-card" style="border:none; box-shadow:none; padding:10px 0 0 0;">
-              <div class="fixture-teams-row">
-                <div class="fixture-team-item"><canvas id="fixBadgeMe" width="56" height="56"></canvas><div>${myClub.code}</div></div>
-                <div class="fixture-vs">VS</div>
-                <div class="fixture-team-item"><canvas id="fixBadgeOpp" width="56" height="56"></canvas><div>${opponent.code}</div></div>
-              </div>
-              <div class="fixture-info" style="margin-top:10px; text-align:center;">
-                MATCHDAY ${career.week} · ${atHome ? 'vs' : '@'} ${opponent.name}
-              </div>
-            </div>
-          </div>
-
-          <div class="panel spotlight-card stagger-3" style="padding: 14px 16px;">
-            <div class="section-tag">DASHBOARD</div>
-            <div class="career-dash-row"><span>Position</span><b>${pos}${['st','nd','rd'][pos-1] || 'th'}</b></div>
-            <div class="career-dash-row"><span>Form</span>
-              <span class="form-chips">${form.length ? form.map(f => `<i class="fc-${f}">${f}</i>`).join('') : '<i class="dim">—</i>'}</span>
-            </div>
-            <div class="career-dash-row"><span>Top scorer</span><b>${scorer.season.goals > 0 ? `${scorer.name.split(' ').pop()} (${scorer.season.goals})` : '—'}</b></div>
-          </div>
-
-          <div class="panel spotlight-card stagger-3" style="padding: 14px 16px;">
-            <div class="section-tag">FINANCES</div>
-            <div class="career-dash-row"><span>Balance</span><b style="color:${fin.balance < 0 ? '#e05263' : 'var(--accent)'};">${fmtCoins(fin.balance)}</b></div>
-            <div class="career-dash-row"><span>Weekly wages</span><b>−${fmtCoins(wages)}</b></div>
-            <div class="career-dash-row"><span>Last matchday</span><b>${fin.lastIncome ? `+${fmtCoins(fin.lastIncome)}` : '—'}</b></div>
-            <div class="career-dash-row"><span>Season projection</span><b>${fmtCoins(projection)}</b></div>
-          </div>
-
-          ${news.length ? `
-          <div class="panel spotlight-card stagger-4" style="padding: 14px 16px;">
-            <div class="section-tag">CLUB NEWS</div>
-            ${news.map(n => `<div class="news-line">S${n.season} MD${n.week} — ${n.text}</div>`).join('')}
-          </div>` : ''}
-
-          <div class="panel spotlight-card stagger-4" style="padding: 16px; display: flex; flex-direction: column; gap: 8px;">
-            <button class="btn primary magnetic-btn" id="careerPlayBtn" style="width:100%; justify-content:center;">${icon('play', 18)} PLAY MATCH</button>
-            <button class="btn magnetic-btn" id="careerSimBtn" style="width:100%; justify-content:center;">⏩ SIM FIXTURE</button>
-            <button class="btn magnetic-btn" id="careerSquadBtn" style="width:100%; justify-content:center;">👥 SQUAD</button>
-            <button class="btn magnetic-btn" id="careerMarketBtn" style="width:100%; justify-content:center;">💱 TRANSFERS${windowOpen(career) ? ' <span style="color:var(--accent);">•OPEN</span>' : ''}</button>
-            <button class="btn magnetic-btn" id="careerResetBtn" style="width:100%; justify-content:center; border-color:#e05263; color:#e05263;">RESET CAREER</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="select-actions stagger-5" style="margin-top: 10px;">
+      <div class="select-actions stagger-5" style="margin-top: 4px;">
         <button class="btn back magnetic-btn" id="careerMenuBtn">${icon('home', 16)} MAIN MENU</button>
       </div>
     `;
 
+    // ---- V5 U2: career hub tiles (boxes → dedicated pages) ----
+    const miniIdx = table.findIndex(r => r.id === myClub.id);
+    const slice = table.slice(Math.max(0, Math.min(miniIdx - 1, table.length - 3)), Math.max(3, miniIdx + 2));
+    const miniTable = slice.map(r => {
+      const p = table.indexOf(r) + 1;
+      return `<span class="mini-row ${r.id === myClub.id ? 'mine' : ''}"><i>${p}</i> ${CLUBS[r.id].code} <b>${r.pts}</b></span>`;
+    }).join('');
+    const next3 = [];
+    for (let w = career.week; w <= career.rounds.length && next3.length < 3; w++) {
+      const f = career.rounds[w - 1].find(x => x.home === myClub.id || x.away === myClub.id);
+      if (f) next3.push(`<span class="dim">MD${w}</span> ${f.home === myClub.id ? 'vs ' + CLUBS[f.away].code : '@ ' + CLUBS[f.home].code}`);
+    }
+    const tiles = [
+      hubTile({ icon: 'play', title: fx.cup ? 'NEXT MATCH · DREAM CUP' : 'NEXT MATCH', size: 'hero', accent: true,
+        sub: fx.cup
+          ? `CUP ${CUP_ROUND_NAMES[ensureCup(career).round]} · ${atHome ? 'HOME vs' : 'AWAY @'} ${opponent.name}`
+          : `MATCHDAY ${career.week} · ${atHome ? 'HOME vs' : 'AWAY @'} ${opponent.name}`,
+        liveHTML: `<span class="nm-badges"><canvas id="nmMe" width="44" height="44"></canvas><b>VS</b><canvas id="nmOpp" width="44" height="44"></canvas></span>`,
+        onOpen: () => this.triggerWipe(() => this.preMatch({
+          homeClub: myClub, awayClub: opponent,
+          difficulty: this.sel.difficulty, halfLength: this.sel.half, isCareer: true,
+          trainingFocus: career.trainingFocus || 'Youth',
+          coaches: career.coaches || {},
+        })) }),
+      hubTile({ icon: 'tablelist', title: 'LEAGUE TABLE', size: 'wide',
+        sub: `You are ${pos}${['st','nd','rd'][pos-1] || 'th'} · ${form.map(f => f).join(' ') || 'no games yet'}`,
+        liveHTML: `<span class="mini-table">${miniTable}</span>`,
+        onOpen: () => this.triggerWipe(() => tablePage(this, career)) }),
+      hubTile({ icon: 'calendar', title: 'FIXTURES', sub: `${totalRounds(career) - career.week + 1} rounds left`,
+        liveHTML: next3.join('<br>'),
+        onOpen: () => this.triggerWipe(() => fixturesPage(this, career)) }),
+      hubTile({ icon: 'trophy', title: 'DREAM CUP',
+        sub: (() => {
+          const cup = ensureCup(career);
+          if (cupFinished(cup)) return `${CLUBS[cup.champion].code} champions · You: ${userCupLabel(career)}`;
+          if (cup.userOut !== null) return userCupLabel(career);
+          return `${CUP_ROUND_NAMES[cup.round]} · MD ${CUP_WEEKS[cup.round]}`;
+        })(),
+        badge: fx.cup ? 'NEXT' : '',
+        onOpen: () => this.triggerWipe(() => cupPage(this, career)) }),
+      hubTile({ icon: 'coins', title: 'FINANCES',
+        sub: `Net ${fin.lastIncome ? fmtCoins(fin.lastIncome - fin.lastWages) : '—'} last MD`,
+        liveHTML: `<b style="font-size:16px; color:${fin.balance < 0 ? '#e05263' : 'var(--accent)'};">${fmtCoins(fin.balance)}</b>`,
+        onOpen: () => this.triggerWipe(() => financesPage(this, career)) }),
+      hubTile({ icon: 'swap', title: 'TRANSFERS', sub: windowOpen(career) ? 'Window open' : `Opens MD ${nextWindowWeek(career) ?? 'end of season'}`,
+        badge: windowOpen(career) ? 'OPEN' : '', onOpen: () => this.triggerWipe(() => marketPage(this, career)) }),
+      hubTile({ icon: 'users', title: 'SQUAD', sub: `${myClub.squad.length} players`,
+        liveHTML: `<b>OVR ${Math.round(myClub.squad.reduce((s, p) => s + p.overall, 0) / myClub.squad.length)}</b>${scorer.season.goals > 0 ? ` · ${scorer.name.split(' ').pop()} ${scorer.season.goals}g` : ''}`,
+        onOpen: () => this.triggerWipe(() => squadPage(this, myClub)) }),
+      hubTile({ icon: 'chart', title: 'TRAINING', sub: `Focus: ${career.trainingFocus || 'Youth'}`,
+        liveHTML: `<b>${Object.values(career.coaches || {}).filter(Boolean).length} Active Coaches</b>`,
+        onOpen: () => this.triggerWipe(() => trainingPage(this, career)) }),
+      hubTile({ icon: 'star', title: 'LEADERBOARDS',
+        sub: (() => { const gb = goldenBoot(career); return gb && (gb.player.season?.goals ?? 0) > 0 ? `Golden Boot: ${gb.player.name.split(' ').pop()} ${gb.player.season.goals}g` : 'No goals yet'; })(),
+        onOpen: () => this.triggerWipe(() => leaderboardPage(this, career)) }),
+      hubTile({ icon: 'briefcase', title: 'BOARDROOM',
+        sub: (() => {
+          ensureBoardState(career);
+          const conf = career.board?.confidence ?? 60;
+          return `Confidence: ${conf}% (${getConfidenceLabel(conf)})`;
+        })(),
+        liveHTML: (() => {
+          ensureBoardState(career);
+          const conf = career.board?.confidence ?? 60;
+          const col = getConfidenceColor(conf);
+          const delta = career.board?.lastDelta ?? 0;
+          const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '▶';
+          const deltaCol = delta > 0 ? '#00d4a3' : delta < 0 ? '#e05263' : 'var(--muted)';
+          return `<span style="font-weight:800; color:${col};">${getConfidenceLabel(conf).toUpperCase()}</span>
+                  ${delta !== 0 ? `<span style="font-size:10px; color:${deltaCol}; margin-left:6px;">${arrow} ${Math.abs(delta)}%</span>` : ''}`;
+        })(),
+        onOpen: () => this.triggerWipe(() => boardPage(this, career)) }),
+      hubTile({ icon: 'news', title: 'CLUB NEWS', size: 'wide', sub: news.length ? '' : 'No headlines yet',
+
+        liveHTML: news.slice(0, 2).map(n => `<span class="dim">MD${n.week} — ${n.text}</span>`).join('<br>'),
+        onOpen: () => this.triggerWipe(() => marketPage(this, career)) }),
+      hubTile({ icon: 'restart', title: 'SIM FIXTURE', sub: 'Quick-sim this matchday',
+        onOpen: () => {
+          if (fx.cup) playCupRound(career, null); // sim the due cup tie, not the league round
+          else completeRound(career, null);
+          syncSeasonStats(career);
+          localStorage.setItem('dreamkick.v2', JSON.stringify(this.save));
+          Toast.show(fx.cup ? 'Cup tie simulated.' : 'Matchday simulated.', 'success');
+          this.triggerWipe(() => this.career());
+        } }),
+    ];
+    el.querySelector('#careerHub').replaceWith(hubGrid(tiles));
+
     setTimeout(() => {
-      el.querySelectorAll('.badge-mini').forEach(c => drawBadge(c, CLUBS[parseInt(c.dataset.club)]));
       drawBadge(el.querySelector('#chBadge'), myClub);
-      drawBadge(el.querySelector('#fixBadgeMe'), myClub);
-      drawBadge(el.querySelector('#fixBadgeOpp'), opponent);
+      drawBadge(el.querySelector('#nmMe'), atHome ? myClub : opponent);
+      drawBadge(el.querySelector('#nmOpp'), atHome ? opponent : myClub);
     }, 50);
 
     el.querySelector('#careerMenuBtn').onclick = () => this.triggerWipe(() => this.menu());
-
-    el.querySelector('#careerPlayBtn').onclick = () => {
-      const opts = {
-        homeClub: myClub, awayClub: opponent,
-        difficulty: this.sel.difficulty, halfLength: this.sel.half, isCareer: true,
-      };
-      this.triggerWipe(() => this.preMatch(opts));
-    };
-
-    el.querySelector('#careerSimBtn').onclick = () => {
-      completeRound(career, null); // quick-sims the user fixture too
-      syncSeasonStats(career);
-      localStorage.setItem('dreamkick.v2', JSON.stringify(this.save));
-      Toast.show('Matchday simulated.', 'success');
-      this.triggerWipe(() => this.career());
-    };
-
-    el.querySelector('#careerSquadBtn').onclick = () => this.squadModal(myClub);
-    el.querySelector('#careerMarketBtn').onclick = () => this.marketModal(career);
-
-    el.querySelector('#careerResetBtn').onclick = () => {
-      if (confirm('Are you sure you want to reset your career progress?')) {
-        this.save.career = { version: CAREER_VERSION, clubId: null };
-        localStorage.setItem('dreamkick.v2', JSON.stringify(this.save));
-        Toast.show('Career progress reset.', 'error');
-        this.triggerWipe(() => this.career());
-      }
-    };
+    // career RESET moved to Settings → DATA (V5 U4)
 
     this.show(el);
     this.setupInteractions(el);
@@ -725,137 +732,88 @@ export class Screens {
     const champion = CLUBS[table[0].id];
     const myPos = leaguePosition(career);
     const scorer = topScorer(career);
+    const userDiv = career.division || divisionOf(career);
+
+    // Call endSeason once to evaluate objectives and determine if sacked
+    const { summary, next } = endSeason(career);
+
+    // Promotion / relegation / sacked banner
+    let divBanner = '';
+    if (summary.sacked) {
+      divBanner = `<div class="div-banner div-relegated" style="margin-top:10px; padding:8px 14px; border-radius:6px; background:rgba(224,82,99,0.18); color:#e05263; font-weight:800; letter-spacing:0.06em;">SACKED BY THE BOARD</div>`;
+    } else if (userDiv === 1 && myPos >= 9) {
+      divBanner = `<div class="div-banner div-relegated" style="margin-top:10px; padding:8px 14px; border-radius:6px; background:rgba(224,82,99,0.18); color:#e05263; font-weight:800; letter-spacing:0.06em;">RELEGATED TO DIVISION 2</div>`;
+    } else if (userDiv === 2 && myPos <= 2) {
+      divBanner = `<div class="div-banner div-promoted" style="margin-top:10px; padding:8px 14px; border-radius:6px; background:rgba(0,212,163,0.18); color:var(--accent); font-weight:800; letter-spacing:0.06em;">PROMOTED TO DIVISION 1!</div>`;
+    } else {
+      divBanner = `<div style="margin-top:10px; color:var(--muted); font-size:12px;">Division ${userDiv} next season.</div>`;
+    }
+
+    const nextBtnText = summary.sacked ? 'FIND NEW CLUB' : `START SEASON ${next.season}`;
+    const nextBtnIcon = summary.sacked ? 'users' : 'restart';
+
     el.innerHTML = `
       <div class="screen-title">${icon('trophy', 26)} SEASON ${career.season} COMPLETE</div>
       <div class="panel spotlight-card stagger-1" style="padding: 26px 34px; text-align:center; max-width: 440px;">
         <canvas id="champBadge" width="72" height="72"></canvas>
-        <div class="section-tag" style="margin-top:10px;">CHAMPIONS</div>
+        <div class="section-tag" style="margin-top:10px;">DIVISION 1 CHAMPIONS</div>
         <div style="font-size:22px; font-weight:900;">${champion.name}</div>
-        <div class="dim" style="margin-top:12px;">You finished <b>${myPos}${['st','nd','rd'][myPos-1] || 'th'}</b> with ${table.find(r => r.id === career.clubId).pts} points.</div>
+        <div class="dim" style="margin-top:12px;">
+          ${summary.sacked 
+            ? `Your contract has been terminated. The board was dissatisfied with your performance (Confidence: ${career.board?.confidence ?? 0}%).`
+            : `You finished <b>${myPos}${['st','nd','rd'][myPos-1] || 'th'}</b> in Division ${userDiv} with ${table.find(r => r.id === career.clubId)?.pts ?? 0} points.`
+          }
+        </div>
         <div class="dim" style="margin-top:4px;">Top scorer: ${scorer.name} (${scorer.season.goals})</div>
+        ${(() => { const gb = goldenBoot(career); const gbClub = gb ? CLUBS[gb.clubId] : null; return gb && (gb.player.season?.goals ?? 0) > 0 ? `<div class="dim" style="margin-top:2px;">${icon('star', 12)} <b>Golden Boot:</b> ${gb.player.name} (${gbClub?.code ?? ''}) &mdash; ${gb.player.season.goals} goals</div>` : ''; })()}
+        <div class="dim" style="margin-top:4px;">${icon('trophy', 12)} Dream Cup: <b>${(() => { const c = ensureCup(career); return c.champion !== null ? CLUBS[c.champion].name : 'in progress'; })()}</b> · You: ${userCupLabel(career)}</div>
+        
+        <div style="margin-top: 12px; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 6px; font-size: 12px; text-align: left;">
+          <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Season Prize Money:</span><b style="color:var(--accent);">+${fmtCoins(summary.prize)}</b></div>
+          ${summary.boardBonus > 0 ? `<div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Board Objectives Bonus:</span><b style="color:#00d4a3;">+${fmtCoins(summary.boardBonus)}</b></div>` : ''}
+          <div style="display:flex; justify-content:space-between;"><span>Final Board Confidence:</span><b style="color:${getConfidenceColor(career.board?.confidence ?? 60)};">${career.board?.confidence ?? 60}%</b></div>
+        </div>
+
+        ${divBanner}
         <div class="dim" style="margin-top:10px; font-size:11px;">Players develop over the summer — young talents grow, veterans decline.</div>
       </div>
       <div class="select-actions stagger-2">
         <button class="btn back magnetic-btn" id="ssMenuBtn">${icon('home', 16)} MAIN MENU</button>
-        <button class="btn magnetic-btn" id="ssMarketBtn">💱 TRANSFERS</button>
-        <button class="btn primary big magnetic-btn" id="ssNextBtn">${icon('restart', 16)} START SEASON ${career.season + 1}</button>
+        ${summary.sacked ? '' : `<button class="btn magnetic-btn" id="ssMarketBtn">${icon('swap', 16)} TRANSFERS</button>`}
+        <button class="btn primary big magnetic-btn" id="ssNextBtn">${icon(nextBtnIcon, 16)} ${nextBtnText}</button>
       </div>`;
     setTimeout(() => drawBadge(el.querySelector('#champBadge'), champion), 50);
     el.querySelector('#ssMenuBtn').onclick = () => this.triggerWipe(() => this.menu());
-    el.querySelector('#ssMarketBtn').onclick = () => this.marketModal(career);
+    if (!summary.sacked) {
+      el.querySelector('#ssMarketBtn').onclick = () => this.triggerWipe(() => marketPage(this, career));
+    }
     el.querySelector('#ssNextBtn').onclick = () => {
-      const { summary, next } = endSeason(career);
       this.save.career = next;
       localStorage.setItem('dreamkick.v2', JSON.stringify(this.save));
-      if (summary.forcedSale) {
-        Toast.show(`CLUB NEWS: ${summary.forcedSale.player} sold for ${summary.forcedSale.fee} coins to balance the books. Youth prospect ${summary.forcedSale.youth} promoted.`, 'error');
+      
+      if (summary.sacked) {
+        Toast.show('You have been sacked! Choose a new bottom-half club to restart.', 'error', 6000);
+      } else {
+        if (summary.forcedSale) {
+          Toast.show(`CLUB NEWS: ${summary.forcedSale.player} sold for ${summary.forcedSale.fee} coins to balance the books. Youth prospect ${summary.forcedSale.youth} promoted.`, 'error');
+        }
+        if (summary.divisionChange === 'promoted') {
+          Toast.show(`PROMOTED! Welcome to Division 1, Season ${next.season}! Prize: +${summary.prize} coins.`, 'success');
+        } else if (summary.divisionChange === 'relegated') {
+          Toast.show(`Relegated to Division 2. Bounce back in Season ${next.season}! Prize: +${summary.prize} coins.`, 'error');
+        } else {
+          Toast.show(`Season ${next.season} begins! Prize money: +${summary.prize} coins.`, 'success');
+        }
       }
-      Toast.show(`Season ${next.season} begins! Prize money: +${summary.prize} coins.`, 'success');
       this.triggerWipe(() => this.career());
     };
     this.show(el);
     this.setupInteractions(el);
   }
 
-  /** V4 Phase B — transfer market modal (buy / sell / news). */
-  marketModal(career) {
-    const m = ensureMarket(career);
-    const open = windowOpen(career);
-    const me = CLUBS[career.clubId];
-    const nw = nextWindowWeek(career);
-    const persist = () => localStorage.setItem('dreamkick.v2', JSON.stringify(this.save));
 
-    const modal = document.createElement('div');
-    modal.className = 'modal-backdrop in';
-    modal.style.zIndex = '9001';
-    modal.innerHTML = `
-      <div class="modal-panel" style="max-width: 520px; max-height: 88vh; display:flex; flex-direction:column;">
-        <div class="modal-header"><h2>TRANSFER MARKET</h2><button class="modal-close">&times;</button></div>
-        <div class="modal-content" id="mktBody" style="overflow-y:auto;"></div>
-        <div class="modal-actions"><button class="btn primary modal-ok">CLOSE</button></div>
-      </div>`;
-    document.body.appendChild(modal);
-    const body = modal.querySelector('#mktBody');
-
-    const render = () => {
-      const balance = career.finance?.balance ?? 0;
-      body.innerHTML = `
-        <div class="career-dash-row"><span>Window</span><b style="color:${open ? 'var(--accent)' : '#e05263'};">${open ? 'OPEN' : `CLOSED — opens ${nw ? 'matchday ' + nw : 'end of season'}`}</b></div>
-        <div class="career-dash-row"><span>Balance</span><b>${fmtCoins(balance)}</b></div>
-        <div class="section-tag" style="margin-top:12px;">LISTINGS</div>
-        <div id="mktListings" style="display:flex; flex-direction:column; gap:6px;">
-          ${m.listings.map((l, i) => {
-            const p = listingPlayer(l);
-            if (!p) return '';
-            return `<div class="career-dash-row"><span>${p.pos} · ${p.name} (${p.overall}) <i class="dim">${CLUBS[l.club].code}, ${p.age}y</i></span>
-              <b>${fmtCoins(l.price)} <button class="btn" data-buy="${i}" style="padding:2px 10px; margin-left:6px;" ${!open || balance < l.price || me.squad.length >= MAX_SQUAD ? 'disabled' : ''}>BUY</button></b></div>`;
-          }).join('') || '<div class="dim">No listings.</div>'}
-        </div>
-        <div class="section-tag" style="margin-top:12px;">SELL (resolves next matchday)</div>
-        <div style="display:flex; flex-direction:column; gap:6px;">
-          ${[...me.squad].sort((a, b) => b.overall - a.overall).map(p => {
-            const listed = m.myListings.find(l => l.playerId === p.id);
-            return `<div class="career-dash-row"><span>${p.pos} · ${p.name} (${p.overall})</span>
-              <b>${listed ? `ask ${fmtCoins(listed.ask)} <button class="btn" data-unlist="${p.id}" style="padding:2px 10px;">✕</button>`
-                : `<button class="btn" data-sell="${p.id}" style="padding:2px 10px;">LIST ~${fmtCoins(suggestedFee(p))}</button>`}</b></div>`;
-          }).join('')}
-        </div>
-        <div class="section-tag" style="margin-top:12px;">TRANSFER NEWS</div>
-        ${m.news.map(n => `<div class="dim" style="font-size:12px; padding:2px 0;">S${n.season} MD${n.week}: ${n.text}</div>`).join('') || '<div class="dim">Quiet so far.</div>'}
-      `;
-      body.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => {
-        const err = buyPlayer(career, m.listings[parseInt(b.dataset.buy)]);
-        if (err) Toast.show(err, 'error');
-        else { Toast.show('Player signed!', 'success'); persist(); }
-        render();
-      });
-      body.querySelectorAll('[data-sell]').forEach(b => b.onclick = () => {
-        const p = me.squad.find(x => x.id === b.dataset.sell);
-        const ask = parseInt(prompt(`Asking price for ${p.name}? (value ~${suggestedFee(p)})`, suggestedFee(p)) || '0');
-        if (!ask) return;
-        const err = listForSale(career, p.id, ask);
-        if (err) Toast.show(err, 'error'); else persist();
-        render();
-      });
-      body.querySelectorAll('[data-unlist]').forEach(b => b.onclick = () => {
-        unlist(career, b.dataset.unlist); persist(); render();
-      });
-    };
-    render();
-    persist(); // ensureMarket may have generated a window
-
-    const close = () => modal.remove();
-    modal.querySelector('.modal-close').onclick = close;
-    modal.querySelector('.modal-ok').onclick = close;
-    modal.onclick = e => { if (e.target === modal) close(); };
-  }
-
-  /** Squad list modal — dossier on double-tap (career dashboard). */
-  squadModal(club) {
-    const modal = document.createElement('div');
-    modal.className = 'modal-backdrop in';
-    modal.style.zIndex = '9001';
-    modal.innerHTML = `
-      <div class="modal-panel" style="max-width: 460px; max-height: 86vh; display:flex; flex-direction:column;">
-        <div class="modal-header"><h2>SQUAD — ${club.name.toUpperCase()}</h2><button class="modal-close">&times;</button></div>
-        <div class="modal-content" id="squadList" style="overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
-        <div class="modal-actions"><button class="btn primary modal-ok">CLOSE</button></div>
-      </div>`;
-    document.body.appendChild(modal);
-    const list = modal.querySelector('#squadList');
-    [...club.squad].sort((a, b) => b.overall - a.overall).forEach(p => {
-      const card = renderPlayerCard(p, club.kits.home, {
-        className: 'rowcard',
-        onClick: () => showPlayerInfoPopup(p, club.kits.home),
-        onDblClick: () => showPlayerInfoPopup(p, club.kits.home),
-      });
-      list.appendChild(card);
-    });
-    const close = () => modal.remove();
-    modal.querySelector('.modal-close').onclick = close;
-    modal.querySelector('.modal-ok').onclick = close;
-    modal.onclick = e => { if (e.target === modal) close(); };
-  }
+  /* Transfer market + squad: promoted to dedicated pages in V5 U3 —
+     see ui/pages/clubPages.js (marketPage, squadPage). */
 }
 
 function statRow(label, hv, av) {

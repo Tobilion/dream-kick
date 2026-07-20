@@ -24,21 +24,32 @@ assert(wageOf(better) > wageOf(worse), 'higher overall → higher wage');
 
 /* ---- new career gets a finance block ---- */
 let career = newCareer(CLUB_ID);
-assert(career.version === 4, 'CAREER_VERSION is 4');
+assert(career.version === CAREER_VERSION, `CAREER_VERSION is ${CAREER_VERSION}`);
 assert(career.finance.balance === startingBalance(CLUBS[CLUB_ID].rating),
   'starting balance derived from club rating');
 
 /* ---- balance changes every matchday by (income − wages) ---- */
+/* Since V4 Phase C a completeRound call can settle 1–2 matchdays (a due cup
+   tie plus the league fixture) and cup silverware adds prize money, so the
+   expected delta is the sum of the NEW ledger entries (+ any cup prize). */
 let ok = true;
 while (!seasonOver(career)) {
   const before = career.finance.balance;
-  const wages = wageBill(CLUBS[CLUB_ID].squad);
+  const cupDoneBefore = career.cup ? career.cup.round >= 5 : false;
   completeRound(career, null);
-  const { lastIncome } = career.finance;
-  if (career.finance.balance !== before + lastIncome - wages) ok = false;
-  if (lastIncome <= 0) ok = false;
+  // ledger entries appended by this call (tagged so the 12-cap can't hide them)
+  const appended = career.finance.log.filter(e => e._seen !== true);
+  let delta = 0;
+  for (const e of appended) { delta += e.income - e.wages; e._seen = true; }
+  let prize = 0;
+  if (!cupDoneBefore && career.cup?.round >= 5) {
+    if (career.cup.champion === CLUB_ID) prize = 8000;
+    else if (career.cup.userOut === 4) prize = 3000;
+  }
+  if (career.finance.balance !== before + delta + prize) ok = false;
+  if (appended.some(e => e.income <= 0)) ok = false;
 }
-assert(ok, 'balance moves by exactly (income − wages) on all 19 matchdays');
+assert(ok, 'balance moves by exactly (income − wages) per settled matchday');
 assert(career.finance.log.length === 12, 'finance log capped at 12 entries');
 
 /* ---- prize money lands at endSeason & carries to next season ---- */
@@ -46,7 +57,7 @@ const pos = leaguePosition(career);
 const balBefore = career.finance.balance;
 const { summary, next } = endSeason(career);
 assert(summary.prize === seasonPrize(pos), 'summary prize matches position table');
-assert(next.finance.balance === balBefore + summary.prize + (summary.forcedSale?.fee || 0),
+assert(next.finance.balance === balBefore + summary.prize + (summary.boardBonus || 0) + (summary.forcedSale?.fee || 0),
   'prize money credited and balance carried into next season');
 assert(seasonPrize(1) > seasonPrize(10) && seasonPrize(10) > seasonPrize(20),
   'prize table strictly favors higher finishes');
@@ -55,7 +66,7 @@ assert(seasonPrize(1) > seasonPrize(10) && seasonPrize(10) > seasonPrize(20),
 const v3save = { career: { ...newCareer(CLUB_ID), version: 3 } };
 delete v3save.career.finance; delete v3save.career.transfers;
 const migrated = migrateCareer(v3save);
-assert(migrated.version === 4 && migrated.finance &&
+assert(migrated.version === CAREER_VERSION && migrated.finance &&
   migrated.finance.balance === startingBalance(CLUBS[CLUB_ID].rating),
   'v3 save migrates in place with a valid starting balance');
 assert(migrated.week === v3save.career.week && migrated.clubId === CLUB_ID,
@@ -64,11 +75,15 @@ assert(migrated.week === v3save.career.week && migrated.clubId === CLUB_ID,
 /* ---- forced sale triggers in a contrived negative-balance season ---- */
 let broke = newCareer(CLUB_ID);
 broke.finance.balance = -50000; // deep in the red
+// Pin confidence well above sack threshold so the forced-sale test stays valid.
+broke.board.confidence = 50;
 const squadBefore = CLUBS[CLUB_ID].squad.map(p => p.id);
 const topValue = [...CLUBS[CLUB_ID].squad].filter(p => p.pos !== 'GK')
   .sort((a, b) => b.marketValue - a.marketValue)[0];
 while (!seasonOver(broke)) completeRound(broke, null);
+broke.board.confidence = 50; // ensure not sacked so applyCareerToClubs replay test stays valid
 const res = endSeason(broke);
+
 assert(res.summary.forcedSale !== null, 'forced sale triggers when balance negative at season end');
 assert(res.summary.forcedSale.player === topValue.name && topValue.pos !== 'GK',
   'forced sale picks highest-value non-GK player');

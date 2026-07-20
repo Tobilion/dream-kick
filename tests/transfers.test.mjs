@@ -19,11 +19,11 @@ const me = () => CLUBS[CLUB_ID];
 let career = newCareer(CLUB_ID);
 career.finance.balance = 100000; // rich club for buy tests
 
-/* ---- window cadence ---- */
-assert(!windowOpen(career), 'week 1: window closed');
-assert(nextWindowWeek(career) === 5, 'next window is matchday 5');
+/* ---- window cadence (always-open per user directive) ---- */
+assert(windowOpen(career), 'week 1: window always open');
+assert(nextWindowWeek(career) === null || typeof nextWindowWeek(career) === 'number', 'nextWindowWeek returns null/number');
 while (career.week < 5) completeRound(career, null);
-assert(windowOpen(career), 'week 5: window open');
+assert(windowOpen(career), 'week 5: window still open');
 
 /* ---- listings ---- */
 const m = ensureMarket(career);

@@ -7,6 +7,7 @@
 import { CONFIG } from '../core/config.js';
 import { clamp, norm2, dot2 } from '../core/math.js';
 import { PSTATE } from './player.js';
+import { getMoraleMultiplier } from '../data/teams.js';
 
 const P = CONFIG.PLAYER;
 const B = CONFIG.BALL;
@@ -62,9 +63,10 @@ export class PassingSystem {
     const d = Math.hypot(tx - pl.pos.x, tz - pl.pos.z);
     let dir = norm2(tx - pl.pos.x, tz - pl.pos.z);
 
-    // subtle noise: ONLY from passer rating + pressure
+    // subtle noise: ONLY from passer rating + pressure fuzzed by morale
     const pr = this.pressure(match, pl);
-    const maxErr = (1 - pl.data.pass / 100) * 0.05 + pr * 0.035; // radians
+    const moraleMult = getMoraleMultiplier(pl.data);
+    const maxErr = ((1 - pl.data.pass / 100) * 0.05 + pr * 0.035) * moraleMult; // radians
     const ang = Math.atan2(dir.z, dir.x) + (match.rng() * 2 - 1) * maxErr;
     dir = { x: Math.cos(ang), z: Math.sin(ang) };
 

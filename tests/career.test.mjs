@@ -18,13 +18,13 @@ const assert = (c, msg) => { console.log((c ? 'PASS ' : 'FAIL ') + msg); if (!c)
 const CLUB_ID = 2;
 let career = newCareer(CLUB_ID);
 
-assert(totalRounds(career) === 19, '19 rounds (each club faced once)');
+assert(totalRounds(career) === 18, '18 rounds (double round-robin of 10)');
 const seen = new Set();
 for (const r of career.rounds) for (const f of r) {
   if (f.home === CLUB_ID) seen.add(f.away);
   if (f.away === CLUB_ID) seen.add(f.home);
 }
-assert(seen.size === 19, 'user faces all 19 other clubs exactly once');
+assert(seen.size === 9, 'user faces all 9 other clubs in their division');
 
 /* play 2 fixtures with the REAL engine */
 for (let i = 0; i < 2; i++) {
@@ -70,7 +70,7 @@ assert(!!ts, 'top scorer resolvable after reload');
 while (!seasonOver(reloaded)) completeRound(reloaded, null);
 assert(seasonOver(reloaded), 'season completes');
 table = leagueTable(reloaded);
-assert(table.every(r => r.pld === 19), 'all clubs played 19 at season end');
+assert(table.every(r => r.pld === 18), 'all clubs played 18 at season end');
 
 const youngster = CLUBS.flatMap(c => c.squad).find(p => p.age < 22);
 const before = { age: youngster.age, sum: youngster.pace + youngster.shoot + youngster.pass };

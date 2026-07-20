@@ -1,5 +1,5 @@
 /* sw.js — offline cache for Dream Kick v2 */
-const CACHE = 'dreamkick-v2.11.0'; // bumped: replay, results layout, career hero, sim hardening
+const CACHE = 'dreamkick-v2.23.0'; // bumped: V6 Phase L3 — Board objectives & confidence
 const ASSETS = [
   './',
   './index.html',
@@ -15,6 +15,8 @@ const ASSETS = [
   './src/core/career.js',
   './src/core/finance.js',
   './src/core/transfers.js',
+  './src/core/cup.js',
+  './src/core/board.js',
   './src/render/replay.js',
   './src/data/names.js',
   './src/data/teams.js',
@@ -50,10 +52,22 @@ const ASSETS = [
   './src/ui/teamManagement.js',
   './src/ui/settingsScreen.js',
   './src/ui/matchFlow.js',
+  './src/ui/hub.js',
+  './src/ui/pages/careerPages.js',
+  './src/ui/pages/clubPages.js',
+  './src/ui/pages/trainingPages.js',
+  './src/ui/pages/settingsPage.js',
+  './src/ui/pages/howToPlay.js',
+  './src/ui/pages/leaderboards.js',
+  './src/ui/pages/boardPage.js',
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // cache:'reload' bypasses the HTTP cache — without it Chrome can seal STALE
+  // copies into a fresh SW cache (python http.server sends no Cache-Control).
+  e.waitUntil(caches.open(CACHE)
+    .then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {

@@ -71,10 +71,12 @@ function makePlayer(rng, region, used, pos, num, rating) {
   return p;
 }
 
-/** Market value in €m: overall + youth premium (peaks ~23, tails off past 30). */
+/** Market value in €m: overall + youth premium (peaks ~23, tails off past 30) fuzzed by morale. */
 export function valueOf(p) {
   const ageFactor = p.age <= 23 ? 1.35 - (23 - p.age) * 0.03 : clamp(1.35 - (p.age - 23) * 0.09, 0.25, 1.35);
-  return Math.round(Math.pow(1.11, p.overall - 60) * 2.2 * ageFactor * 10) / 10;
+  const morale = p.morale ?? 70;
+  const moraleFactor = 0.92 + (morale / 100) * 0.16;
+  return Math.round(Math.pow(1.11, p.overall - 60) * 2.2 * ageFactor * moraleFactor * 10) / 10;
 }
 
 /** Weekly wage in coins, from overall + age (V4 Phase A). */
@@ -149,4 +151,25 @@ export function pickLineup(club, formation) {
   const xi = [];
   for (const pos of ['GK', 'DF', 'MF', 'FW']) xi.push(...byPos[pos].slice(0, want[pos]));
   return xi;
+}
+
+/** Morale performance multiplier: 20 -> 1.03 (worst), 70 -> 1.0 (baseline), 95 -> 0.97 (best). */
+export function getMoraleMultiplier(p) {
+  if (!p || p.morale === undefined) return 1.0;
+  if (p.morale === 70) return 1.0;
+  if (p.morale < 70) {
+    const t = (70 - p.morale) / 50; // 0..1
+    return 1.0 + t * 0.03;
+  } else {
+    const t = (p.morale - 70) / 25; // 0..1
+    return 1.0 - t * 0.03;
+  }
+}
+
+/** Morale label and styling details. */
+export function moraleLabelAndColor(m) {
+  if (m >= 80) return { label: 'Excellent', color: 'var(--accent)' };
+  if (m >= 60) return { label: 'Content', color: '#38bdf8' }; // light blue
+  if (m >= 40) return { label: 'Concerned', color: '#fbbf24' }; // yellow
+  return { label: 'Unsettled', color: '#f87171' }; // red
 }

@@ -2,7 +2,8 @@
  *  Sportsim-pro PlayerDossierModal.tsx / PlayerCompareModal.tsx patterns). */
 import { drawPortrait } from './draw.js';
 import { initSpotlight } from './components.js';
-import { playerForm } from '../data/teams.js';
+import { playerForm, moraleLabelAndColor } from '../data/teams.js';
+import { icon } from './icons.js';
 
 /** Render a polished card representation of a player.
  *  Accepts either an engine Player (with .data) or a plain squad data object. */
@@ -58,11 +59,11 @@ export function renderPlayerCard(player, kitColors, options = {}) {
 
 /** Age phase label (Sportsim-pro dossier pattern). */
 function agePhase(age) {
-  if (age < 20) return '🌱 Prospect';
-  if (age < 24) return '⚡ Rising Star';
-  if (age < 28) return '🔥 Prime';
-  if (age < 32) return '🧭 Veteran';
-  return '📉 Twilight';
+  if (age < 20) return 'Prospect';
+  if (age < 24) return 'Rising Star';
+  if (age < 28) return 'Prime';
+  if (age < 32) return 'Veteran';
+  return 'Twilight';
 }
 
 function attrBar(label, v) {
@@ -99,8 +100,15 @@ export function showPlayerInfoPopup(playerOrEntity, kitColors) {
             <span class="dh-pos pos-${player.pos}">${player.pos}</span>
             <span class="dh-meta">#${player.num} · Age ${player.age ?? '—'} · ${agePhase(player.age ?? 26)}</span>
           </div>
-          <div class="dh-tags">
-            <span class="dh-meta">Market value <b>€${player.marketValue ?? '—'}m</b> · Morale <b>${player.morale ?? '—'}</b></span>
+          <div class="dh-tags" style="margin-top:4px;">
+            <span class="dh-meta">Market value <b>€${player.marketValue ?? '—'}m</b></span>
+            ${(() => {
+              const mc = moraleLabelAndColor(player.morale ?? 70);
+              return `
+                <span class="dh-meta" style="display:inline-flex; align-items:center; gap:4px; padding:2px 6px; border-radius:4px; background:${mc.color}1c; color:${mc.color}; font-weight:800; font-size:11px; margin-left:4px; transform:skewX(-1.2deg);">
+                  ${icon('star', 10)} ${mc.label} (${player.morale ?? 70})
+                </span>`;
+            })()}
           </div>
         </div>
         <div class="dh-ovr">

@@ -14,6 +14,16 @@ export function wageBill(squad) {
   return squad.reduce((s, p) => s + (p.wage ?? wageOf(p)), 0);
 }
 
+/** Weekly wage cost for hired coaches (150 coins each). */
+export function activeCoachWages(coaches) {
+  if (!coaches) return 0;
+  let count = 0;
+  if (coaches.Attacking) count++;
+  if (coaches.Defending) count++;
+  if (coaches.Fitness) count++;
+  return count * 150;
+}
+
 /* ---------------- balance & income ---------------- */
 
 export function startingBalance(rating) {
@@ -58,6 +68,19 @@ const PRIZES = [20000, 12000, 8000, 5000, 3500, 2500, 2000, 1600, 1300, 1100];
 
 export function seasonPrize(position) {
   return PRIZES[position - 1] ?? Math.max(400, 1100 - (position - 10) * 70);
+}
+
+/** Division 2 prizes are 60% of Div 1 equivalents. */
+const DIV2_PRIZE_FACTOR = 0.6;
+
+/**
+ * Prize money scaled by division (V4 Phase D).
+ * @param {number} position  1-based finish position within the division
+ * @param {number} division  1 or 2
+ */
+export function seasonPrizeDivision(position, division) {
+  const base = seasonPrize(position);
+  return division === 2 ? Math.round(base * DIV2_PRIZE_FACTOR) : base;
 }
 
 /* ---------------- projection & sale fee ---------------- */
