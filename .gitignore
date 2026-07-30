@@ -4,3 +4,6 @@
 CLAUDE.md
 MASTER_PROMPT.md
 FEATURES.md
+
+# Local Project Console chat memory (not for git)
+.console/

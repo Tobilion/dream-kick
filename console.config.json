@@ -1,0 +1,9 @@
+{
+  "projectName": "Dream Kick",
+  "entries": [
+    { "triggers": ["open project", "start dream kick", "run locally"], "type": "command", "action": "python -m http.server 8000" },
+    { "triggers": ["git status", "show changes"], "type": "command", "action": "git status --short" },
+    { "triggers": ["deploy", "push live", "publish changes"], "type": "command", "action": "git push", "risky": true },
+    { "triggers": ["what is the stack", "describe project"], "type": "answer", "response": "A vanilla JavaScript and Three.js project designed to work without external assets and remain offline-capable as a PWA." }
+  ]
+}
